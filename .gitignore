@@ -90,6 +90,7 @@ starvation_dump.jsonl
 !/disc_probe.*.json
 !/disc_set.json
 !/.recomp.json
+!/recomplauncher.json
 
 # TrapGunnerRecomp: o C recompilado é derivado direto do executável da Atlus.
 # Ele NÃO vai para o repositório público; cada jogador gera localmente

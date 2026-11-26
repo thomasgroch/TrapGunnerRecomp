@@ -1,0 +1,94 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Trap Gunner Recompiled",
+  "repo": "thomasgroch/TrapGunnerRecomp",
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Trap Gunner (USA) disc image — .cue + .bin (Redump)",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "cue",
+            "bin"
+          ]
+        }
+      ],
+      "check": {
+        "iso9660": "SLUS_006.79",
+        "ids": [
+          "SLUS-00679"
+        ]
+      },
+      "dumps": [
+        {
+          "name": "Trap Gunner.bin",
+          "size": 708410640,
+          "crc32": "f6f00f7c"
+        }
+      ]
+    }
+  ],
+  "start": {
+    "program": [
+      "TrapGunner_Recompiled.exe",
+      "TrapGunner_Recompiled.app",
+      "TrapGunner_Recompiled.AppImage",
+      "TrapGunner_Recompiled"
+    ],
+    "args": [
+      "--game",
+      "game.toml",
+      "--disc",
+      "{input:game}"
+    ]
+  },
+  "saves": [
+    "saves",
+    "mods/state.toml"
+  ],
+  "folders": {
+    "logs": [
+      {
+        "path": "{install}"
+      }
+    ],
+    "saves": [
+      {
+        "path": "{install}/saves"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "id": "mods",
+      "label": "Open installed mods (.psxmod)",
+      "open": "mods"
+    },
+    {
+      "id": "cache",
+      "label": "Clear overlay cache",
+      "clear": "cache"
+    }
+  ],
+  "system": {
+    "windows": {
+      "graphics": {
+        "opengl": "3.3"
+      }
+    },
+    "linux": {
+      "graphics": {
+        "opengl": "3.3"
+      }
+    },
+    "macos": {
+      "graphics": {
+        "opengl": "3.3"
+      }
+    }
+  }
+}
