@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trap Gunner Web</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#101418">
+<style>
+  :root { --bg:#101418; --fg:#e6edf3; --muted:#8b949e; --accent:#3fb950; --panel:#161b22; --line:#30363d; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f6f8fa; --fg:#1f2328; --muted:#57606a; --panel:#fff; --line:#d0d7de; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { margin:0 0 16px; color:var(--muted); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  canvas { width:100%; max-width:960px; aspect-ratio:4/3; background:#000; image-rendering:pixelated; border-radius:8px; display:block; }
+  button, label.btn { display:inline-block; background:var(--accent); color:#04130a; border:0; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  input[type=file] { display:none; }
+  #status { color:var(--muted); margin-top:8px; min-height:1.5em; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  kbd { border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:13px; }
+  details { color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trap Gunner Web</h1>
+  <p class="sub">O jogo roda no seu navegador, a partir do <b>seu</b> disco. Nada do jogo é enviado para servidor nenhum.</p>
+
+  <div class="panel" id="setup">
+    <div class="row">
+      <label class="btn">Escolher disco (.bin)<input id="disc" type="file" accept=".bin,.img,.iso"></label>
+      <button class="secondary" id="cached" hidden>Usar disco salvo no navegador</button>
+      <label class="row" style="gap:6px"><input type="checkbox" id="skipfmv" checked> Pular vídeos</label>
+    </div>
+    <div id="status">Dump Redump de Trap Gunner (USA, SLUS-00679).</div>
+  </div>
+
+  <canvas id="screen" width="640" height="480"></canvas>
+
+  <details class="panel">
+    <summary>Controles</summary>
+    <p>Gamepad (Bluetooth/USB) é detectado sozinho. Teclado: setas = direcional, <kbd>X</kbd> = ✕, <kbd>Z</kbd> = ○,
+      <kbd>S</kbd> = □, <kbd>A</kbd> = △, <kbd>Enter</kbd> = START, <kbd>Shift</kbd> = SELECT, <kbd>Q</kbd>/<kbd>W</kbd> = L1/R1.</p>
+  </details>
+</main>
+<script src="main.js"></script>
+</body>
+</html>

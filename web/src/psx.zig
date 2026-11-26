@@ -569,6 +569,21 @@ pub const Psx = struct {
         self.updateTimers();
     }
 
+    /// Fast boot: roda a BIOS até o shell (0x80030000), onde o EXE é carregado.
+    pub fn bootToShell(self: *Psx) bool {
+        var guard: u64 = 0;
+        while (self.cpu.pc != 0x80030000 and guard < 200_000_000) : (guard += 1) {
+            hleHooks(self);
+            self.cpu.step(self);
+            if (self.cycles >= self.next_vblank) {
+                self.next_vblank += CYCLES_PER_FRAME;
+                self.frame += 1;
+                self.raise(.vblank);
+            }
+        }
+        return self.cpu.pc == 0x80030000;
+    }
+
     /// Patch protegido em RAM: só escreve se as palavras atuais forem as esperadas.
     pub fn patchWords(self: *Psx, addr: u32, expected: []const u32, replace: []const u32) bool {
         const a = addr & 0x1FFFFF;

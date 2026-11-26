@@ -1,0 +1,10 @@
+{
+  "name": "Trap Gunner Web",
+  "short_name": "Trap Gunner",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "icons": []
+}

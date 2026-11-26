@@ -23,8 +23,8 @@ pub fn build(b: *std.Build) void {
     wasm.entry = .disabled;
     wasm.rdynamic = true;
     wasm.import_memory = false;
-    wasm.initial_memory = 64 * 65536 * 16; // 64 MiB
-    wasm.max_memory = 64 * 65536 * 16;
+    wasm.initial_memory = 32 * 1024 * 1024;
+    wasm.max_memory = 64 * 1024 * 1024;
     const install_wasm = b.addInstallFile(wasm.getEmittedBin(), "../www/psxcore.wasm");
     b.step("wasm", "Build www/psxcore.wasm").dependOn(&install_wasm.step);
 
