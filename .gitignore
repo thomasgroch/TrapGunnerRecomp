@@ -106,3 +106,4 @@ starvation_dump.jsonl
 /web/zig-out/
 /web/.zig-cache/
 /web/www/psxcore.wasm
+!/web/www/openbios.bin
