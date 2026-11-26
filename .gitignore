@@ -101,3 +101,8 @@ starvation_dump.jsonl
 # Zig
 /tools/tgtool/zig-out/
 /tools/tgtool/.zig-cache/
+
+# web (Zig)
+/web/zig-out/
+/web/.zig-cache/
+/web/www/psxcore.wasm
