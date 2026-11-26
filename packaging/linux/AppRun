@@ -1,0 +1,199 @@
+#!/bin/sh
+# AppImage entry point. The new-project scaffold (setup_project.sh or
+# setup_project.ps1) stamped the environment variable prefix into this copy
+# when the project was created. The placeholders still left (upper-case names
+# between at-signs) are stamped at release time by
+# psxrecomp/tools/package_title_release.py from packaging/release.toml.
+#
+# psxrecomp anchors settings, assets, saves, cache, and mods to argv[0]. Inside
+# an AppImage that anchor is a read-only squashfs mount, so everything writable
+# is seeded into a per-user data directory and the runtime is invoked through a
+# symlink that lives there.
+set -eu
+
+if [ -z "${APPDIR:-}" ]; then
+    echo "@APP_NAME@: APPDIR is not set; launch this through the AppImage runtime." >&2
+    exit 1
+fi
+
+if [ -n "${TRAPGUNNERRECOMP_DATA_DIR:-}" ]; then
+    data_dir=$TRAPGUNNERRECOMP_DATA_DIR
+else
+    if [ -n "${XDG_DATA_HOME:-}" ]; then
+        data_home=$XDG_DATA_HOME
+    elif [ -n "${HOME:-}" ]; then
+        data_home=$HOME/.local/share
+    else
+        echo "@APP_NAME@: HOME is not set; set TRAPGUNNERRECOMP_DATA_DIR explicitly." >&2
+        exit 1
+    fi
+    data_dir=$data_home/@ARTIFACT_NAME@
+fi
+# The launcher path below is built from data_dir and exec'd after cd into it.
+case $data_dir in /*) ;; *) data_dir=$PWD/$data_dir ;; esac
+
+payload=$APPDIR/usr/share/@PAYLOAD_DIR@
+runtime=$APPDIR/usr/bin/@EXE_NAME@
+
+if [ ! -x "$runtime" ] || [ ! -f "$payload/game.toml" ]; then
+    echo "@APP_NAME@: AppImage payload is incomplete." >&2
+    exit 1
+fi
+
+mkdir -p "$data_dir" "$data_dir/saves" "$data_dir/cache" "$data_dir/mods"
+
+# Release-owned resources: refreshed every launch so an AppImage update can
+# repair or extend its bundled catalog without touching user settings, memory
+# cards, installed third-party mods, or generated cache data.
+for tree in assets bios licenses docs; do
+    if [ -d "$payload/$tree" ]; then
+        mkdir -p "$data_dir/$tree"
+        cp -a "$payload/$tree/." "$data_dir/$tree/"
+        chmod -R u+rwX "$data_dir/$tree"
+    fi
+done
+# Only the release owns bundled/. Replacing that catalog also retires removed
+# packages; merging it would leave old controls active after an update.
+# Installed packages, selections, settings, saves and generated cache stay put.
+rm -rf "$data_dir/mods/bundled"
+if [ -d "$payload/mods" ]; then
+    cp -a "$payload/mods/." "$data_dir/mods/"
+    chmod -R u+rwX "$data_dir/mods"
+fi
+
+# The bundled overlay cache is a head start, but the cache is also written by
+# the running game as it discovers new code. Seed without clobbering: the
+# release's shards fill in what is missing, and anything the player has already
+# built stays. -n is essential here; -a alone would overwrite user shards on
+# every launch.
+if [ -d "$payload/cache" ]; then
+    mkdir -p "$data_dir/cache"
+    cp -a -n "$payload/cache/." "$data_dir/cache/" 2>/dev/null || true
+    chmod -R u+rwX "$data_dir/cache"
+fi
+
+# Link the read-only bundled overlay toolchain into the writable data directory.
+# The runtime looks beside argv[0], and argv[0] is the launcher symlink below.
+if [ -d "$payload/overlay_toolchain" ]; then
+    if [ -L "$data_dir/overlay_toolchain" ] || [ ! -e "$data_dir/overlay_toolchain" ]; then
+        ln -sfn "$payload/overlay_toolchain" "$data_dir/overlay_toolchain"
+    fi
+fi
+for file in game.toml game_options.toml LICENSE PERMISSIONS.md README.md START_HERE.txt AOT_CACHE_AUDIT.json VERSION RELEASE_NOTES.md RELEASE_MANIFEST.json; do
+    if [ -f "$payload/$file" ]; then
+        cp -f "$payload/$file" "$data_dir/$file"
+        chmod u+rw "$data_dir/$file"
+    fi
+done
+
+# input.ini and keybinds.ini become user-owned after first launch.
+if [ ! -f "$data_dir/input.ini" ] && [ -f "$payload/input.ini" ]; then
+    cp "$payload/input.ini" "$data_dir/input.ini"
+    chmod u+rw "$data_dir/input.ini"
+fi
+
+# Stamped by package_title_release.py from the title VERSION file so the layout
+# marker never drifts from the artifact name.
+printf '%s\n' "@VERSION@" > "$data_dir/.appimage-layout-version"
+
+if [ "${TRAPGUNNERRECOMP_SEED_ONLY:-0}" = "1" ]; then
+    printf '%s\n' "$data_dir"
+    exit 0
+fi
+
+launcher=$data_dir/.@EXE_NAME@-runtime
+ln -sfn "$runtime" "$launcher"
+appimage_path=${APPIMAGE:-}
+export TRAPGUNNERRECOMP_APPIMAGE_PATH=$appimage_path
+export RECOMP_APPIMAGE_PATH=$appimage_path
+
+# An explicit validation/runtime override may preselect a disc without baking
+# a developer path into the reproducible release configuration.
+disc_override=${TRAPGUNNERRECOMP_DISC:-}
+# A TOML basic string cannot hold a raw control character.
+case $disc_override in
+    *[[:cntrl:]]*)
+        echo "@APP_NAME@: TRAPGUNNERRECOMP_DISC contains a control character; ignoring it." >&2
+        disc_override=
+        ;;
+esac
+if [ -n "$disc_override" ] && [ ! -f "$disc_override" ]; then
+    echo "@APP_NAME@: TRAPGUNNERRECOMP_DISC is not a file; ignoring it." >&2
+    disc_override=
+fi
+if [ -n "$disc_override" ] && [ -f "$disc_override" ]; then
+    # game.toml resolves a relative disc against its own directory (the data
+    # directory), not against the directory this script was started from.
+    case $disc_override in /*) ;; *) disc_override=$PWD/$disc_override ;; esac
+    config_tmp=$data_dir/.game.toml.tmp
+    # The path reaches awk through ENVIRON, not -v: awk expands backslash
+    # escapes in -v values, so a literal backslash-n in a path would become a
+    # newline. It is escaped one character at a time because what gsub does
+    # with backslashes in its replacement differs between awk implementations,
+    # and blanks are matched with [ \t] because mawk 1.3.3 has no [[:space:]].
+    # The line replaces any disc key in [game] and is written at the end of
+    # that table, wherever the table sits in the file; a header may be
+    # indented, use a quoted key, carry a trailing comment, or end in CR.
+    # awk exits 3 without a [game] table and 4 when [game] lists discs.
+    if PSXRECOMP_APPRUN_DISC=$disc_override awk '
+        BEGIN {
+            raw = ENVIRON["PSXRECOMP_APPRUN_DISC"]
+            escaped = ""
+            for (i = 1; i <= length(raw); i++) {
+                c = substr(raw, i, 1)
+                if (c == "\\" || c == "\"") {
+                    escaped = escaped "\\"
+                }
+                escaped = escaped c
+            }
+            disc_line = "disc = \"" escaped "\""
+            in_game = 0
+            inserted = 0
+            multi = 0
+        }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+        }
+        line ~ /^[ \t]*\[/ && line ~ /\][ \t]*(#.*)?$/ {
+            if (in_game && !inserted) {
+                print disc_line
+                inserted = 1
+            }
+            in_game = (line ~ /^[ \t]*\[[ \t]*(game|"game"|\047game\047)[ \t]*\][ \t]*(#.*)?$/)
+        }
+        in_game && line ~ /^[ \t]*(discs|"discs"|\047discs\047)[ \t]*=/ { multi = 1 }
+        in_game && line ~ /^[ \t]*(disc|"disc"|\047disc\047)[ \t]*=/ { next }
+        { print }
+        END {
+            if (in_game && !inserted) {
+                print disc_line
+                inserted = 1
+            }
+            if (multi) {
+                exit 4
+            }
+            if (!inserted) {
+                exit 3
+            }
+        }
+    ' "$data_dir/game.toml" > "$config_tmp"; then
+        mv "$config_tmp" "$data_dir/game.toml"
+    else
+        status=$?
+        rm -f "$config_tmp"
+        case $status in
+            3) echo "@APP_NAME@: game.toml has no [game] table; ignoring TRAPGUNNERRECOMP_DISC." >&2 ;;
+            4) echo "@APP_NAME@: [game] lists discs, which wins over disc; ignoring TRAPGUNNERRECOMP_DISC." >&2 ;;
+            *) echo "@APP_NAME@: could not rewrite game.toml (awk exit $status); ignoring TRAPGUNNERRECOMP_DISC." >&2 ;;
+        esac
+    fi
+fi
+unset APPIMAGE
+
+export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+cd "$data_dir"
+exec "$launcher" "$@"

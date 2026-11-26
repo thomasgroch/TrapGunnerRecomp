@@ -1,0 +1,13 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "TrapGunner",
+  "system": "PS1",
+  "type": "recomp",
+  "toolchain": "psxrecomp",
+  "status": "playable-early",
+  "project": "TrapGunnerRecomp",
+  "original": {
+    "region": "USA",
+    "serial": "SLUS-00679"
+  }
+}
