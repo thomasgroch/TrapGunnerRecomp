@@ -1,0 +1,48 @@
+format_version = 11
+id = "trapgunner.gameplay.infinite-timer"
+version = "1.0.0"
+name = "Infinite Match Timer"
+author = "TrapGunnerRecomp"
+description = "Stops the match clock (Story, VS COM and VS MAN). Example mod for TrapGunnerRecomp."
+license = "MIT"
+resolver = "declarative"
+
+[[target]]
+game_id = "SLUS-00679"
+
+[[feature]]
+id = "infinite-timer"
+name = "Infinite Match Timer"
+description = "The TIME counter (word at 0x801093D8) never decreases."
+group = "Gameplay"
+default_enabled = false
+
+# Each site is `addiu rX, rX, -1` right before `sw rX, 0x93d8(at)`.
+# Replacing the immediate -1 with 0 keeps the store but freezes the value.
+[[patch]]
+feature = "infinite-timer"
+target = "main_exe"
+address = 0x80023FA8
+expected = "ff ff 63 24"
+replace = "00 00 63 24"
+
+[[patch]]
+feature = "infinite-timer"
+target = "main_exe"
+address = 0x80028538
+expected = "ff ff 42 24"
+replace = "00 00 42 24"
+
+[[patch]]
+feature = "infinite-timer"
+target = "main_exe"
+address = 0x80029114
+expected = "ff ff 42 24"
+replace = "00 00 42 24"
+
+[[patch]]
+feature = "infinite-timer"
+target = "main_exe"
+address = 0x80029ECC
+expected = "ff ff 42 24"
+replace = "00 00 42 24"

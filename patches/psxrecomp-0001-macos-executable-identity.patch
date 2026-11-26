@@ -1,0 +1,30 @@
+diff --git a/runtime/src/host_executable_identity.cpp b/runtime/src/host_executable_identity.cpp
+index 12487955..d8437931 100644
+--- a/runtime/src/host_executable_identity.cpp
++++ b/runtime/src/host_executable_identity.cpp
+@@ -10,6 +10,10 @@
+ #define NOMINMAX
+ #endif
+ #include <windows.h>
++#elif defined(__APPLE__)
++#include <libproc.h>
++#include <string>
++#include <unistd.h>
+ #endif
+ 
+ namespace {
+@@ -30,6 +34,14 @@ bool image_digest(uint8_t out[32]) {
+     // Open this procfs anchor directly: resolving its symlink to a pathname
+     // would hash a replacement if the executable was renamed/unlinked.
+     return psx_sha256_file(std::filesystem::path("/proc/self/exe"),out)==PsxFileHashResult::Ok;
++#elif defined(__APPLE__)
++    // Ask the kernel for this process's image path (libproc), independent of
++    // argv[0] and the caller's cwd. A running Mach-O image stays mapped by
++    // the kernel; replacing the file on disk requires a new inode.
++    char path[PROC_PIDPATHINFO_MAXSIZE];
++    const int n=proc_pidpath(getpid(),path,sizeof path);
++    if (n<=0) return false;
++    return psx_sha256_file(std::filesystem::path(std::string(path,static_cast<size_t>(n))),out)==PsxFileHashResult::Ok;
+ #else
+     // No verified image anchor has been qualified here. Keep the portable
+     // build functional, but never substitute a guessed argv/cwd identity.

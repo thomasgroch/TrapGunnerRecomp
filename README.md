@@ -23,6 +23,9 @@ compilados em segundo plano; o que ainda não for nativo cai num interpretador.
 | Movimento do jogador | ✅ |
 | VS MAN (2 jogadores): seleção, fase e controles independentes | ✅ |
 | Overlays | ✅ 100% nativo: o jogo não tem overlays (veja [docs/AOT.md](docs/AOT.md)) |
+| Mods (`.psxmod`) — exemplo *Infinite Match Timer* | ✅ testado |
+| Netplay (rollback, LAN/Direct IP e lobby online) | ✅ 2 instâncias sincronizadas (macOS) |
+| RecompLauncher (`recomplauncher.json`) | ✅ valida no schema oficial |
 | Campanha completa, áudio e saves | 🔍 ainda não validados |
 
 Testado no macOS (Apple Silicon). O psxrecomp também suporta Windows e Linux.
@@ -62,6 +65,63 @@ cd tools/tgtool && zig build -Doptimize=ReleaseFast && zig build test
 ./zig-out/bin/tgtool extract "Trap Gunner.bin" out  # lê a ISO9660 (MODE2/2352) e extrai o EXE
 ./zig-out/bin/tgtool setup   "Trap Gunner.cue"      # verify + extract em disc/
 ```
+
+## 🧩 Mods
+
+O jogo usa o sistema de mods do psxrecomp (`.psxmod` = ZIP + `manifest.toml`).
+
+- **Embutidos:** `mods/preloaded/packages/<id>/<versão>/` vêm no build, desligados por
+  padrão. Para ligar, use a aba Mods do launcher.
+- **Do jogador:** arquivos `.psxmod` em `mods/installed/` (instale pelo launcher).
+- **Exemplo incluído:** `trapgunner.gameplay.infinite-timer`. Ele para o relógio da
+  partida trocando os quatro `addiu rX, rX, -1` que decrementam o word `0x801093D8`.
+  Gere o `.psxmod` com:
+  ```bash
+  python3 psxrecomp/tools/psxmod_pack.py \
+    mods/preloaded/packages/trapgunner.gameplay.infinite-timer/1.0.0 \
+    dist/trapgunner-infinite-timer-1.0.0.psxmod
+  ```
+- Formato completo: `psxrecomp/psxmod.md` e `psxrecomp/docs/MOD_PACKAGES.md`.
+- No netplay, os mods de gameplay são desligados (a sessão é *vanilla*) para os dois
+  lados ficarem determinísticos.
+
+## 🌐 Online (netplay)
+
+Rollback via [recomp-net](https://github.com/RetroPortingToolKit/recomp-net). O launcher
+recomp-ui (botão **NETPLAY**) oferece:
+
+- **Online:** lobby `ws://netplay.retcomm.net:8765` (ICE/TURN, SFU de reserva)
+- **LAN / Direct IP:** UDP na porta 7777
+
+Os dois jogadores precisam do **mesmo build** e do **mesmo dump**: o framework compara
+o executável, a BIOS, o disco e a config. O catálogo de host do título fica em
+`src/trapgunner_netplay_host.c` (perfil `trapgunner-vanilla`, arm64 e x64).
+
+> 🍎 **macOS:** o psxrecomp upstream só identifica o executável em Windows e Linux.
+> `patches/psxrecomp-0001-macos-executable-identity.patch` adiciona o macOS
+> (`proc_pidpath`). O `scripts/build.sh` aplica o patch.
+
+Teste por linha de comando, sem launcher:
+```bash
+PSX_NETPLAY=1 PSX_NET_SLOT=0 PSX_NET_SLOTS=2 PSX_NET_BIND=0.0.0.0:7777 \
+  PSX_NET_PEER=<ip-do-amigo>:7777 PSX_NET_MODE=rollback \
+  ./build-release/TrapGunner_Recompiled --game game.toml
+# o amigo usa PSX_NET_SLOT=1
+```
+
+## 🚀 RecompLauncher
+
+O [`recomplauncher.json`](recomplauncher.json) (formato 1, validado no CI contra
+<https://recomplauncher.com/schema/recomplauncher.json>) declara:
+
+- **entrada `game`:** o `.cue`/`.bin` do jogador, conferido pelo `SLUS_006.79` na ISO9660,
+  pelo serial `SLUS-00679` e pelo dump Redump (CRC32 `f6f00f7c`);
+- **início:** `TrapGunner_Recompiled --game game.toml --disc {input:game}`;
+- **saves, logs e ações** (abrir mods, limpar cache de overlay).
+
+O `scripts/package_release.sh` coloca o manifesto na raiz do zip, ao lado do
+executável. Os nomes dos assets (`trapgunner-<versão>-windows-x64.zip` etc.) seguem
+o padrão que o launcher reconhece.
 
 ## 🧪 Teste automatizado (headless)
 

@@ -16,14 +16,13 @@ project(TrapGunnerRecomp LANGUAGES C CXX)
 # The wizard (WIZARD_CMAKE_BLOCK / ENABLE_SETUP_WIZARD) is the first-run disc
 # picker; releases are compiled from the committed generated/ C, so it never
 # needs to generate or rebuild anything on a player's machine.
-set(PSX_RECOMP_UI OFF CACHE BOOL
-    "No recomp-ui submodule in this scaffold" FORCE)
-# Full netplay UI — enable after adding recomp-ui + testing:
-# if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
-#     set(PSX_NETPLAY ON CACHE BOOL "…" FORCE)
-# endif()
-# First-run setup wizard — enable after testing:
-# set(PSX_SETUP_WIZARD ON CACHE BOOL "…" FORCE)
+# recomp-ui submodule present (PSX_RECOMP_UI defaults ON).
+if(EXISTS "${PSXRECOMP_ROOT}/lib/recomp-net/CMakeLists.txt")
+    set(PSX_NETPLAY ON CACHE BOOL
+        "Link recomp-net delay-sync (opt-in; needs recomp-net)" FORCE)
+endif()
+set(PSX_SETUP_WIZARD ON CACHE BOOL
+    "Advertise first-run setup wizard + Generate & rebuild in recomp-ui" FORCE)
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 # This project's own mod catalog. The FRAMEWORK stages it -- together with its
@@ -40,9 +39,9 @@ endif()
 
 psxrecomp_add_game_runtime(psx-runtime
     PRELOADED_MODS_DIR "${PSX_PRELOADED_MODS}"
-    # ENABLE_NETPLAY_IF_PRESENT
-    # NETPLAY_LOBBY_URL "ws://netplay.retcomm.net:8765"
-    # ENABLE_SETUP_WIZARD
+    ENABLE_NETPLAY_IF_PRESENT
+    NETPLAY_LOBBY_URL "ws://netplay.retcomm.net:8765"
+    ENABLE_SETUP_WIZARD
     WINDOW_TITLE "TrapGunner Recompiled"
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     MAX_PLAYERS 2
@@ -53,8 +52,11 @@ psxrecomp_add_game_runtime(psx-runtime
     # it fails instead of building a setup host.
     GEN_MARKER "generated/SLUS_006.79_dispatch.c"
     GEN_FULL_GLOB "generated/SLUS_006.79_full_*.c"
-    # CODEGEN_SETUP_SOURCES — add with recomp-ui / wizard later
+    CODEGEN_SETUP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/codegen_setup.c"
 )
+
+# Title netplay policy: trusted host-simulation catalog (see the file header).
+target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/trapgunner_netplay_host.c")
 
 # Stage runtime configs next to the exe for direct build/ launches. Only copy
 # files that exist — never fail POST_BUILD when game_options.toml is absent.

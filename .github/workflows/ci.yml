@@ -12,3 +12,22 @@ jobs:
         working-directory: tools/tgtool
       - run: zig build -Doptimize=ReleaseFast
         working-directory: tools/tgtool
+  recomplauncher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install jsonschema
+      - run: |
+          curl -fsSL https://recomplauncher.com/schema/recomplauncher.json -o /tmp/schema.json
+          python - <<'PY'
+          import json, jsonschema
+          s = json.load(open('/tmp/schema.json'))
+          d = json.load(open('recomplauncher.json'))
+          jsonschema.validators.validator_for(s)(s).validate(d)
+          print('recomplauncher.json OK')
+          PY
+  mods:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -c "import tomllib,glob;[tomllib.load(open(f,'rb')) for f in glob.glob('mods/preloaded/packages/*/*/manifest.toml')];print('manifests OK')"

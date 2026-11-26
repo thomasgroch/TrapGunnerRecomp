@@ -6,6 +6,10 @@ CUE="${1:?uso: scripts/build.sh <Trap Gunner.cue>}"
 cd "$(dirname "$0")/.."
 
 echo "🔄 submódulos";        git submodule update --init --recursive
+echo "🩹 patches do framework"
+for p in patches/psxrecomp-*.patch; do
+  git -C psxrecomp apply --check "../$p" 2>/dev/null && git -C psxrecomp apply "../$p" || echo "   (já aplicado: $p)"
+done
 echo "⚡ tgtool (Zig)";      (cd tools/tgtool && zig build -Doptimize=ReleaseFast)
 echo "📀 verificando disco"; ./tools/tgtool/zig-out/bin/tgtool setup "$CUE"
 echo "🛠️  emissores";         bash psxrecomp/tools/ci/build_emitters.sh
