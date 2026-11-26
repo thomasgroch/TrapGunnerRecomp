@@ -123,6 +123,26 @@ O `scripts/package_release.sh` coloca o manifesto na raiz do zip, ao lado do
 executável. Os nomes dos assets (`trapgunner-<versão>-windows-x64.zip` etc.) seguem
 o padrão que o launcher reconhece.
 
+## 📦 Releases (CI)
+
+`.github/workflows/release.yml` (template oficial do psxrecomp) compila **Windows x64**
+e **Linux x64** e anexa um zip por plataforma a uma GitHub Release, já com o
+`recomplauncher.json`. Ele é disparado por tag `v*` ou manualmente
+(*Actions → Release builds*).
+
+O workflow compila o C de `generated/`. Por padrão esse C **não** vai para o
+repositório, porque é derivado do executável da Atlus. Publicar o C (e os
+binários feitos com ele) é decisão do dono do repositório:
+
+```bash
+./scripts/build.sh "isos/Trap Gunner.cue"   # gera generated/
+git add -f generated && git commit -m "Add generated game C"
+git tag v0.1.0 && git push --follow-tags
+```
+
+Android e macOS ainda não fazem parte das releases. O psxrecomp oficial não tem
+alvo Android (só um branch experimental).
+
 ## 🧪 Teste automatizado (headless)
 
 ```bash
