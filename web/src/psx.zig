@@ -72,7 +72,13 @@ pub const Psx = struct {
     dbg_hw: [8][3]u32 = undefined,
     dbg_hw_n: u32 = 0,
     dbg_bs_hits: u32 = 0,
+    dbg_bs_target: u32 = 1,
+    dbg_clone: *Psx = undefined,
+    dbg_clone_ready: bool = false,
+    dbg_bs_frame: u64 = 0,
     mdec1_active: bool = false,
+    dbg_dec_snap: bool = false,
+    dbg_dec_frame: u64 = 0,
     mdec1_left: u32 = 0,
     mdec1_addr: u32 = 0,
     dbg_d3: [40][4]u32 = undefined,
@@ -419,6 +425,11 @@ pub const Psx = struct {
             },
             0 => { // RAM -> MDEC
                 const words = self.blockWords(ch, sync);
+                if (!self.dbg_dec_snap and (self.mdec.cmd >> 29) == 1) {
+                    self.dbg_dec_snap = true;
+                    self.dbg_ramsnap = self.ram;
+                    self.dbg_dec_frame = self.frame;
+                }
                 self.dbg_dma_words0 = words;
                 self.dbg_dma_first0 = std.mem.readInt(u32, self.ram[addr..][0..4], .little);
                 var k: u32 = 0;
@@ -549,11 +560,15 @@ pub fn interpRun(psx: *Psx, until: u64) void {
         psx.last_pc = pc;
         if (pc == 0x8009f4e4) {
             psx.dbg_bs_hits += 1;
-            if (psx.dbg_bs_hits == 3) {
+            if (psx.dbg_bs_hits == psx.dbg_bs_target) {
                 const a = psx.cpu.r[4] & 0x1FFFFF;
                 psx.dbg_bs_addr = a;
+                psx.dbg_bs_frame = psx.frame;
                 @memcpy(&psx.dbg_bs, psx.ram[a .. a + 16384]);
-                psx.dbg_ramsnap = psx.ram;
+                if (!psx.dbg_clone_ready and psx.dbg_bs_hits == 1) {
+                    psx.dbg_clone.* = psx.*;
+                    psx.dbg_clone_ready = true;
+                }
             }
         }
         psx.trace_i +%= 1;

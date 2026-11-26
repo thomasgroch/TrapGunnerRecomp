@@ -28,6 +28,8 @@ pub const Mdec = struct {
     dbg_lastcmd: u32 = 0,
     dbg_frame: [0x40000]u32 = undefined,
     dbg_frame_len: u32 = 0,
+    dbg_rle: [0x8000]u32 = undefined,
+    dbg_rle_len: u32 = 0,
 
     pub fn status(self: *Mdec) u32 {
         var s: u32 = 0;
@@ -159,6 +161,11 @@ pub const Mdec = struct {
 
     fn decode(self: *Mdec) void {
         self.dbg_decodes += 1;
+        if (self.dbg_decodes == 1) {
+            const n = @min(self.in_need, self.dbg_rle.len);
+            @memcpy(self.dbg_rle[0..n], self.in_buf[0..n]);
+            self.dbg_rle_len = n;
+        }
         self.dbg_lastcmd = self.cmd;
         defer {
             self.dbg_words += self.out_len;

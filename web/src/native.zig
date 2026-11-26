@@ -15,6 +15,47 @@ fn readSector(lba: u32, out: *[2352]u8) bool {
 }
 
 var g_psx: Psx = undefined;
+var g_clone: Psx = undefined;
+var g_clone_done = false;
+
+fn countBlocks(ram: []const u8, addr: u32, words: u32) u32 {
+    var pos: u32 = 0;
+    var blocks: u32 = 0;
+    const n = words * 2;
+    const H = struct {
+        fn at(r: []const u8, a: u32, i: u32) u16 {
+            return std.mem.readInt(u16, r[(a + i * 2) & 0x1FFFFF ..][0..2], .little);
+        }
+    };
+    while (pos < n) {
+        while (pos < n and H.at(ram, addr, pos) == 0xFE00) pos += 1;
+        if (pos >= n) break;
+        pos += 1;
+        var k: u32 = 0;
+        while (pos < n) {
+            const h = H.at(ram, addr, pos);
+            pos += 1;
+            k += (h >> 10) + 1;
+            if (k > 63) break;
+        }
+        blocks += 1;
+    }
+    return blocks;
+}
+
+/// Roda o decodificador VLC isolado (IRQs mascaradas) a partir do clone.
+fn vlcExperiment() void {
+    const c = &g_clone;
+    const out = c.cpu.r[5] & 0x1FFFFF; // a1 = buffer RLE
+    const ra = c.cpu.r[31];
+    c.imask = 0;
+    c.cpu.sr &= ~@as(u32, 1);
+    var n: u64 = 0;
+    while (c.cpu.pc != ra and n < 50_000_000) : (n += 1) c.cpu.step(c);
+    const hdr = std.mem.readInt(u32, c.ram[out..][0..4], .little);
+    const words = hdr & 0xFFFF;
+    std.debug.print("VLC isolado: {d} instr, header={x}, blocos={d} (macroblocos={d})\n", .{ n, hdr, countBlocks(&c.ram, out + 4, words), countBlocks(&c.ram, out + 4, words) / 6 });
+}
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -29,6 +70,7 @@ pub fn main(init: std.process.Init) !void {
     g_disc = try Io.Dir.cwd().openFile(io, args[2], .{});
     const exe = try Io.Dir.cwd().readFileAlloc(io, args[3], arena, .limited(4 << 20));
     const frames = try std.fmt.parseInt(u32, args[4], 10);
+    const bs_target: u32 = if (init.environ_map.get("BSHIT")) |v| try std.fmt.parseInt(u32, v, 10) else 1;
 
     const psx = &g_psx;
     psx.init(bios, readSector);
@@ -47,6 +89,8 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("BIOS: shell em {d} instr, frame {d}\n", .{ guard, psx.frame });
     if (!psx.loadExe(exe)) return error.BadExe;
     psx.watch_armed = true;
+    psx.dbg_bs_target = bs_target;
+    psx.dbg_clone = &g_clone;
 
     var f: u32 = 0;
     while (f < frames) : (f += 1) {
@@ -58,6 +102,11 @@ pub fn main(init: std.process.Init) !void {
             if (f == at + 6) psx.sio.buttons[0] = 0xFFFF;
         }
         psx.runFrame(psxmod.interpRun);
+        if (!g_clone_done and psx.dbg_bs_hits >= 1 and psx.dbg_clone_ready) {
+            g_clone_done = true;
+            g_clone = psx.dbg_clone.*;
+            vlcExperiment();
+        }
         if (psx.halted) {
             std.debug.print("PC inválido no frame {d}; últimos PCs:\n", .{f});
             var k: u32 = 0;
@@ -80,7 +129,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("mdec: decodes={d} words={d} lastcmd={x} qt0={d} scale0={d}\n", .{ psx.mdec.dbg_decodes, psx.mdec.dbg_words, psx.mdec.dbg_lastcmd, psx.mdec.qt_y[0], psx.mdec.scale[0] });
     std.debug.print("dma kicks={any} chcrw={any} w0={d} first0={x} chcr0={x} chcr1={x}\n", .{ psx.dbg_dma, psx.dbg_chcr_writes, psx.dbg_dma_words0, psx.dbg_dma_first0, psx.dma_chcr[0], psx.dma_chcr[1] });
     for (psx.dbg_log[0..psx.dbg_log_len]) |e| std.debug.print("dma0 madr={x} bcr={x} chcr={x} | mdec cmd={x} need={d} len={d}\n", .{ e[0], e[1], e[2], e[3], e[4], e[5] });
-    for (psx.cdrom.dbg[0..psx.cdrom.dbg_n]) |e| std.debug.print("cd cmd={x} p0={x} loc={d} mode={x}\n", .{ e[0], e[1], e[2], e[3] });
+    for (psx.cdrom.dbg[0..psx.cdrom.dbg_n]) |e| std.debug.print("cd cmd={x} p0={x} loc={d} frame={d}\n", .{ e[0], e[1], e[2], e[3] });
     for (psx.dbg_mw[0..psx.dbg_mw_n]) |e| std.debug.print("mdec write pc={x} v={x} ra={x}\n", .{ e[0], e[1], e[2] });
     for (psx.dbg_hw[0..psx.dbg_hw_n]) |e| std.debug.print("w1a pc={x} a={x} v={x}\n", .{ e[0], e[1], e[2] });
     std.debug.print("ram 1a0000: ", .{});
@@ -120,9 +169,12 @@ pub fn main(init: std.process.Init) !void {
         const mf = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/mdec3.bin", .{});
         defer mf.close(io);
         try mf.writeStreamingAll(io, std.mem.sliceAsBytes(psx.mdec.dbg_frame[0..psx.mdec.dbg_frame_len]));
+        const rl = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/rle1.bin", .{});
+        defer rl.close(io);
+        try rl.writeStreamingAll(io, std.mem.sliceAsBytes(psx.mdec.dbg_rle[0..psx.mdec.dbg_rle_len]));
     }
     {
-        std.debug.print("bitstream addr={x}\n", .{psx.dbg_bs_addr});
+        std.debug.print("bitstream addr={x} frame={d} hits={d} decode_frame={d}\n", .{ psx.dbg_bs_addr, psx.dbg_bs_frame, psx.dbg_bs_hits, psx.dbg_dec_frame });
         const bf = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/bs1.bin", .{});
         defer bf.close(io);
         try bf.writeStreamingAll(io, &psx.dbg_bs);

@@ -166,7 +166,7 @@ pub const Cdrom = struct {
     fn command(self: *Cdrom, cmd: u8, psx: *Psx) void {
         const p = self.params;
         if (self.dbg_n < 48 and cmd != 1) {
-            self.dbg[self.dbg_n] = .{ cmd, p[0], self.loc, self.mode };
+            self.dbg[self.dbg_n] = .{ cmd, p[0], self.loc, @truncate(psx.frame) };
             self.dbg_n += 1;
         }
         defer self.nparams = 0;
