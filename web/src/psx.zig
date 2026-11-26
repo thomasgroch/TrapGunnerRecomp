@@ -77,6 +77,13 @@ pub const Psx = struct {
     dbg_clone_ready: bool = false,
     dbg_bs_frame: u64 = 0,
     mdec1_active: bool = false,
+    dbg_iop: [32][2]u32 = undefined,
+    dbg_iop_n: u32 = 0,
+    mdec1_stall: u32 = 0,
+    mdec_in_seen: u64 = 0,
+    mdec_last_in: u64 = 0,
+    fmv_skips: u32 = 0,
+    fmv_watchdog: bool = false,
     dbg_dec_snap: bool = false,
     dbg_dec_frame: u64 = 0,
     mdec1_left: u32 = 0,
@@ -211,6 +218,16 @@ pub const Psx = struct {
     // ---------------- I/O ----------------
     fn io_read(self: *Psx, a: u32, size: u8) u32 {
         const off = a - 0x1F801000;
+        if (self.sio.xlog_arm and (off == 0x44 or off == 0x70 or off == 0x40) and self.dbg_iop_n < 32) {
+            var seen = false;
+            for (self.dbg_iop[0..self.dbg_iop_n]) |e| {
+                if (e[0] == self.cpu.cur_pc) seen = true;
+            }
+            if (!seen) {
+                self.dbg_iop[self.dbg_iop_n] = .{ self.cpu.cur_pc, off };
+                self.dbg_iop_n += 1;
+            }
+        }
         switch (off) {
             0x040...0x04F => return self.sio.read(off - 0x40, size),
             0x070 => return self.istat,
@@ -327,6 +344,7 @@ pub const Psx = struct {
                     self.dbg_mw_n += 1;
                 }
                 self.mdec.writeData(v);
+                self.mdec_in_seen +%= 1;
                 self.mdecOutPump();
             },
             0x824 => {
@@ -435,6 +453,7 @@ pub const Psx = struct {
                 var k: u32 = 0;
                 while (k < words) : (k += 1) {
                     self.mdec.writeData(std.mem.readInt(u32, self.ram[addr..][0..4], .little));
+                    self.mdec_in_seen +%= 1;
                     addr = (addr +% step) & 0x1FFFFC;
                 }
                 self.mdecOutPump();
@@ -452,6 +471,32 @@ pub const Psx = struct {
         }
         if (self.watch_armed and self.watch_dma < 0 and std.mem.readInt(u32, self.ram[0x80..0x84], .little) == 0) self.watch_dma = @intCast(ch);
         self.dmaDone(ch);
+    }
+
+    /// Pulo de FMV: se o DMA de saída do MDEC está esperando dados que nunca
+    /// virão (sem entrada nova por 3 frames), completa com pixels pretos.
+    fn mdecWatchdog(self: *Psx) void {
+        if (!self.fmv_watchdog) return;
+        if (!self.mdec1_active or self.mdec.out_pos < self.mdec.out_len) {
+            self.mdec1_stall = 0;
+            return;
+        }
+        if (self.mdec_in_seen != self.mdec_last_in) {
+            self.mdec_last_in = self.mdec_in_seen;
+            self.mdec1_stall = 0;
+            return;
+        }
+        self.mdec1_stall += 1;
+        if (self.mdec1_stall < 3) return;
+        const step: u32 = if (self.dma_chcr[1] & 2 != 0) @bitCast(@as(i32, -4)) else 4;
+        while (self.mdec1_left > 0) : (self.mdec1_left -= 1) {
+            std.mem.writeInt(u32, self.ram[self.mdec1_addr..][0..4], 0, .little);
+            self.mdec1_addr = (self.mdec1_addr +% step) & 0x1FFFFC;
+        }
+        self.mdec1_active = false;
+        self.mdec1_stall = 0;
+        self.fmv_skips += 1;
+        self.dmaDone(1);
     }
 
     /// Continua o DMA1 pendente com os dados que o MDEC já tem.
@@ -520,7 +565,26 @@ pub const Psx = struct {
         self.next_vblank += CYCLES_PER_FRAME;
         self.frame += 1;
         self.raise(.vblank);
+        self.mdecWatchdog();
         self.updateTimers();
+    }
+
+    /// Patch protegido em RAM: só escreve se as palavras atuais forem as esperadas.
+    pub fn patchWords(self: *Psx, addr: u32, expected: []const u32, replace: []const u32) bool {
+        const a = addr & 0x1FFFFF;
+        for (expected, 0..) |w, i| {
+            if (std.mem.readInt(u32, self.ram[a + i * 4 ..][0..4], .little) != w) return false;
+        }
+        for (replace, 0..) |w, i| std.mem.writeInt(u32, self.ram[a + i * 4 ..][0..4], w, .little);
+        return true;
+    }
+
+    /// Trap Gunner (SLUS-00679): pular FMVs. No laço do player (tarefa em
+    /// 0x8001C490), a primeira busca de quadro (`jal 0x8001CBD8` em
+    /// 0x8001C584) vira `j 0x8001C79C`, o caminho de saída/limpeza do próprio
+    /// player — o mesmo que ele toma quando o vídeo termina.
+    pub fn trapGunnerSkipFmv(self: *Psx) bool {
+        return self.patchWords(0x8001C584, &.{0x0C0072F6}, &.{0x080071E7});
     }
 
     /// Carrega um PS-X EXE na RAM e aponta a CPU para a entrada (side-load).
@@ -577,6 +641,7 @@ pub fn interpRun(psx: *Psx, until: u64) void {
             psx.halted = true;
         }
         psx.cpu.step(psx);
+        if (psx.sio.irq_at != 0 and psx.cycles >= psx.sio.irq_at) psx.sio.tick(psx);
     }
 }
 

@@ -88,6 +88,7 @@ pub fn main(init: std.process.Init) !void {
     }
     std.debug.print("BIOS: shell em {d} instr, frame {d}\n", .{ guard, psx.frame });
     if (!psx.loadExe(exe)) return error.BadExe;
+    if (init.environ_map.get("FMV") == null) std.debug.print("skip FMV patch: {}\n", .{psx.trapGunnerSkipFmv()});
     psx.watch_armed = true;
     psx.dbg_bs_target = bs_target;
     psx.dbg_clone = &g_clone;
@@ -98,9 +99,11 @@ pub fn main(init: std.process.Init) !void {
             var it = std.mem.splitScalar(u8, spec, ':');
             const at = try std.fmt.parseInt(u32, it.next().?, 10);
             const mask = try std.fmt.parseInt(u16, it.next().?, 0);
-            if (f >= at and f < at + 6) psx.sio.buttons[0] = 0xFFFF & ~mask;
-            if (f == at + 6) psx.sio.buttons[0] = 0xFFFF;
+            const hold: u32 = if (init.environ_map.get("HOLD")) |v| std.fmt.parseInt(u32, v, 10) catch 6 else 6;
+            if (f >= at and f < at + hold) psx.sio.buttons[0] = 0xFFFF & ~mask;
+            if (f == at + hold) psx.sio.buttons[0] = 0xFFFF;
         }
+        if (f == 600) psx.sio.xlog_arm = true;
         psx.runFrame(psxmod.interpRun);
         if (!g_clone_done and psx.dbg_bs_hits >= 1 and psx.dbg_clone_ready) {
             g_clone_done = true;
@@ -124,7 +127,7 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("\n", .{});
             break;
         }
-        if (f % 60 == 0) std.debug.print("frame {d} pc={x:0>8} disp={} mode={x}\n", .{ f, psx.cpu.pc, psx.gpu.disp_on, psx.gpu.disp_mode });
+        if (f % 60 == 0) std.debug.print("frame {d} pc={x:0>8} disp={} mode={x} fmv_skips={d} fmv_ended={d}\n", .{ f, psx.cpu.pc, psx.gpu.disp_on, psx.gpu.disp_mode, psx.fmv_skips, psx.cdrom.fmv_ended });
     }
     std.debug.print("mdec: decodes={d} words={d} lastcmd={x} qt0={d} scale0={d}\n", .{ psx.mdec.dbg_decodes, psx.mdec.dbg_words, psx.mdec.dbg_lastcmd, psx.mdec.qt_y[0], psx.mdec.scale[0] });
     std.debug.print("dma kicks={any} chcrw={any} w0={d} first0={x} chcr0={x} chcr1={x}\n", .{ psx.dbg_dma, psx.dbg_chcr_writes, psx.dbg_dma_words0, psx.dbg_dma_first0, psx.dma_chcr[0], psx.dma_chcr[1] });
@@ -135,6 +138,22 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("ram 1a0000: ", .{});
     for (0..8) |k| std.debug.print("{x:0>8} ", .{std.mem.readInt(u32, psx.ram[0x1a0000 + k * 4 ..][0..4], .little)});
     std.debug.print("\n", .{});
+    for (psx.sio.xlog[0..psx.sio.xlog_n]) |e| std.debug.print("sio tx={x} rx={x} ack={d} ctrl={x} cyc={d}\n", .{ e[0], e[1], e[2], e[3], e[4] });
+    for (psx.dbg_iop[0..psx.dbg_iop_n]) |e| std.debug.print("io read pc={x} off={x}\n", .{ e[0], e[1] });
+    std.debug.print("sio: pad reads={d}\n", .{psx.sio.dbg_reads});
+    std.debug.print("gpu ops:", .{});
+    for (psx.gpu.dbg_ops, 0..) |n, op| if (n > 0) std.debug.print(" {x}:{d}", .{ op, n });
+    std.debug.print("\nda=({d},{d})-({d},{d}) off=({d},{d})\n", .{ psx.gpu.da_x1, psx.gpu.da_y1, psx.gpu.da_x2, psx.gpu.da_y2, psx.gpu.off_x, psx.gpu.off_y });
+    for (psx.gpu.dbg_cp[0..psx.gpu.dbg_cp_n]) |e| std.debug.print("copy src={x} dst={x} size={x}\n", .{ e[0], e[1], e[2] });
+    {
+        std.debug.print("sr={x} imask={x} istat={x} vsync_ctr={x} a0={x}\n", .{ psx.cpu.sr, psx.imask, psx.istat, std.mem.readInt(u32, psx.ram[0x10815C..][0..4], .little), psx.cpu.r[4] });
+        std.debug.print("ultimos saltos:\n", .{});
+        var k: u32 = 0;
+        while (k < 32) : (k += 1) {
+            const j = psx.jumps[(psx.jump_i +% k) & 31];
+            std.debug.print("{x:0>8}->{x:0>8}\n", .{ j[0], j[1] });
+        }
+    }
     std.debug.print("TTY:\n{s}\n", .{psx.tty[0..psx.tty_len]});
 
     // grava a VRAM inteira (1024x512) como PPM

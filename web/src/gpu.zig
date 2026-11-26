@@ -48,6 +48,9 @@ pub const Gpu = struct {
     vrange2: u32 = 0x100,
     dma_dir: u32 = 0,
     info: u32 = 0,
+    dbg_ops: [256]u32 = @splat(0),
+    dbg_cp: [8][3]u32 = undefined,
+    dbg_cp_n: u32 = 0,
 
     pub fn reset(self: *Gpu) void {
         const v = self.vram;
@@ -287,6 +290,7 @@ pub const Gpu = struct {
     fn execute(self: *Gpu) void {
         const c = &self.cmd;
         const op: u8 = @truncate(c[0] >> 24);
+        self.dbg_ops[op] += 1;
         switch (op) {
             0x00, 0x01 => {},
             0x02 => {
@@ -305,6 +309,10 @@ pub const Gpu = struct {
             0x40...0x5F => self.drawLineCmd(op & 0x10 != 0),
             0x60...0x7F => self.drawRectCmd(op),
             0x80...0x9F => {
+                if (self.dbg_cp_n < 8) {
+                    self.dbg_cp[self.dbg_cp_n] = .{ c[1], c[2], c[3] };
+                    self.dbg_cp_n += 1;
+                }
                 const sx = c[1] & 0x3FF;
                 const sy = (c[1] >> 16) & 0x1FF;
                 const dx = c[2] & 0x3FF;

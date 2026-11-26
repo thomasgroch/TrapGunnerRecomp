@@ -38,6 +38,12 @@ pub const Cdrom = struct {
     filter_file: u8 = 0,
     filter_chan: u8 = 0,
     sector_seq: u32 = 0,
+    /// Pula FMVs: ao ler um setor de vídeo STR, responde DataEnd (INT4).
+    skip_fmv: bool = false,
+    /// Leitura em stream (ReadS) acelerada: divisor do atraso por setor.
+    stream_speedup: u64 = 1,
+    streaming: bool = false,
+    fmv_ended: u32 = 0,
     cur_lba: u32 = 0,
     dlog: [32][4]u32 = undefined,
     dlog_n: u32 = 0,
@@ -182,6 +188,7 @@ pub const Cdrom = struct {
             },
             0x06, 0x1B => { // ReadN / ReadS
                 self.reading = true;
+                self.streaming = cmd == 0x1B;
                 self.stat = 0x22;
                 self.next_read_at = psx.cycles + self.readDelay();
                 self.ackNow(psx, &.{self.stat});
@@ -262,7 +269,8 @@ pub const Cdrom = struct {
     }
 
     fn readDelay(self: *Cdrom) u64 {
-        return if (self.mode & 0x80 != 0) DELAY_READ_1X / 2 else DELAY_READ_1X;
+        const base: u64 = if (self.mode & 0x80 != 0) DELAY_READ_1X / 2 else DELAY_READ_1X;
+        return if (self.streaming) base / self.stream_speedup else base;
     }
 
     pub fn tick(self: *Cdrom, psx: *Psx) void {
@@ -280,6 +288,14 @@ pub const Cdrom = struct {
             // setores de áudio XA (submodo bit 2) vão para a SPU, não para a CPU:
             // descarta sem tocar no buffer do setor de dados anterior
             if (ok and self.mode & 0x40 != 0 and tmp[18] & 0x04 != 0) return;
+            if (ok and self.skip_fmv and tmp[24] == 0x60 and tmp[25] == 0x01 and tmp[26] == 0x01 and tmp[27] == 0x80) {
+                self.reading = false;
+                self.stat = 0x02;
+                self.fmv_ended += 1;
+                self.ack(4, &.{self.stat});
+                psx.raise(.cdrom);
+                return;
+            }
             self.sector = tmp;
             self.cur_lba = self.loc - 1;
             self.ready_sector = ok;
