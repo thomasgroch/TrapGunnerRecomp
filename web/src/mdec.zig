@@ -26,6 +26,8 @@ pub const Mdec = struct {
     dbg_decodes: u32 = 0,
     dbg_words: u64 = 0,
     dbg_lastcmd: u32 = 0,
+    dbg_frame: [0x40000]u32 = undefined,
+    dbg_frame_len: u32 = 0,
 
     pub fn status(self: *Mdec) u32 {
         var s: u32 = 0;
@@ -158,7 +160,13 @@ pub const Mdec = struct {
     fn decode(self: *Mdec) void {
         self.dbg_decodes += 1;
         self.dbg_lastcmd = self.cmd;
-        defer self.dbg_words += self.out_len;
+        defer {
+            self.dbg_words += self.out_len;
+            if (self.dbg_decodes == 3) {
+                @memcpy(self.dbg_frame[0..self.out_len], self.out[0..self.out_len]);
+                self.dbg_frame_len = self.out_len;
+            }
+        }
         const depth = (self.cmd >> 27) & 3;
         const signed = self.cmd & (1 << 26) != 0;
         const bit15: u32 = if (self.cmd & (1 << 25) != 0) 0x8000 else 0;

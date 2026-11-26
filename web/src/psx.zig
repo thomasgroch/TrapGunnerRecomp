@@ -67,6 +67,19 @@ pub const Psx = struct {
     dbg_dma_words0: u32 = 0,
     dbg_log: [16][6]u32 = undefined,
     dbg_log_len: u32 = 0,
+    dbg_mw: [8][3]u32 = undefined,
+    dbg_mw_n: u32 = 0,
+    dbg_hw: [8][3]u32 = undefined,
+    dbg_hw_n: u32 = 0,
+    dbg_bs_hits: u32 = 0,
+    mdec1_active: bool = false,
+    mdec1_left: u32 = 0,
+    mdec1_addr: u32 = 0,
+    dbg_d3: [40][4]u32 = undefined,
+    dbg_d3_n: u32 = 0,
+    dbg_bs: [16384]u8 = undefined,
+    dbg_bs_addr: u32 = 0,
+    dbg_ramsnap: [RAM_SIZE]u8 = undefined,
     dbg_dma_first0: u32 = 0,
     dbg_chcr_writes: [7]u32 = @splat(0),
 
@@ -132,6 +145,10 @@ pub const Psx = struct {
         const a = phys(addr);
         if (a < 0x00800000) {
             if (self.watch_armed and (a & (RAM_SIZE - 1)) < 0x100 and self.watch_pc == 0) self.watch_pc = self.cpu.cur_pc;
+            if (self.dbg_hw_n < 8 and (a & 0x1FFFFC) == 0x1a0000) {
+                self.dbg_hw[self.dbg_hw_n] = .{ self.cpu.cur_pc, a, @as(u32, v) };
+                self.dbg_hw_n += 1;
+            }
             std.mem.writeInt(u32, self.ram[a & (RAM_SIZE - 1) ..][0..4], v, .little);
             if (self.code_write_hook) |h| h(a & (RAM_SIZE - 1));
             return;
@@ -143,6 +160,10 @@ pub const Psx = struct {
         const a = phys(addr);
         if (a < 0x00800000) {
             if (self.watch_armed and (a & (RAM_SIZE - 1)) < 0x100 and self.watch_pc == 0) self.watch_pc = self.cpu.cur_pc;
+            if (self.dbg_hw_n < 8 and (a & 0x1FFFFC) == 0x1a0000) {
+                self.dbg_hw[self.dbg_hw_n] = .{ self.cpu.cur_pc, a, @as(u32, v) };
+                self.dbg_hw_n += 1;
+            }
             std.mem.writeInt(u16, self.ram[a & (RAM_SIZE - 1) ..][0..2], v, .little);
             if (self.code_write_hook) |h| h(a & (RAM_SIZE - 1));
             return;
@@ -154,6 +175,10 @@ pub const Psx = struct {
         const a = phys(addr);
         if (a < 0x00800000) {
             if (self.watch_armed and (a & (RAM_SIZE - 1)) < 0x100 and self.watch_pc == 0) self.watch_pc = self.cpu.cur_pc;
+            if (self.dbg_hw_n < 8 and (a & 0x1FFFFC) == 0x1a0000) {
+                self.dbg_hw[self.dbg_hw_n] = .{ self.cpu.cur_pc, a, @as(u32, v) };
+                self.dbg_hw_n += 1;
+            }
             self.ram[a & (RAM_SIZE - 1)] = v;
             if (self.code_write_hook) |h| h(a & (RAM_SIZE - 1));
             return;
@@ -209,7 +234,14 @@ pub const Psx = struct {
                     else => 0,
                 };
             },
-            0x800...0x803 => return self.cdrom.read(@truncate(off - 0x800), self),
+            0x800...0x803 => {
+                if (off == 0x802 and size >= 2) {
+                    const lo: u32 = self.cdrom.read(2, self);
+                    const hi: u32 = self.cdrom.read(2, self);
+                    return lo | (hi << 8);
+                }
+                return self.cdrom.read(@truncate(off - 0x800), self);
+            },
             0x810 => return self.gpu.gpuread(),
             0x814 => return self.gpu.status(self.frame),
             0x820 => return self.mdec.readData(),
@@ -283,8 +315,18 @@ pub const Psx = struct {
             },
             0x800...0x803 => self.cdrom.write(@truncate(off - 0x800), @truncate(v), self),
             0x810 => self.gpu.gp0(v, self),
-            0x820 => self.mdec.writeData(v),
-            0x824 => self.mdec.control(v),
+            0x820 => {
+                if (self.dbg_mw_n < 8) {
+                    self.dbg_mw[self.dbg_mw_n] = .{ self.cpu.cur_pc, v, self.cpu.r[31] };
+                    self.dbg_mw_n += 1;
+                }
+                self.mdec.writeData(v);
+                self.mdecOutPump();
+            },
+            0x824 => {
+                self.mdec.control(v);
+                if (v & 0x80000000 != 0) self.mdec1_active = false;
+            },
             0x814 => self.gpu.gp1(v),
             0xC00...0xFFF => {
                 const idx = (off - 0xC00) >> 1;
@@ -365,6 +407,10 @@ pub const Psx = struct {
             },
             3 => {
                 const words = self.blockWords(ch, sync);
+                if (self.cdrom.cur_lba >= 10515 and self.cdrom.cur_lba < 10530 and self.dbg_d3_n < 40) {
+                    self.dbg_d3[self.dbg_d3_n] = .{ self.cdrom.cur_lba, addr, words, self.cdrom.data_pos };
+                    self.dbg_d3_n += 1;
+                }
                 var k: u32 = 0;
                 while (k < words) : (k += 1) {
                     std.mem.writeInt(u32, self.ram[addr..][0..4], self.cdrom.dataWord(), .little);
@@ -380,20 +426,36 @@ pub const Psx = struct {
                     self.mdec.writeData(std.mem.readInt(u32, self.ram[addr..][0..4], .little));
                     addr = (addr +% step) & 0x1FFFFC;
                 }
+                self.mdecOutPump();
             },
-            1 => { // MDEC -> RAM: só enquanto o MDEC tiver dados (DREQ)
-                const avail = self.mdec.out_len -| self.mdec.out_pos;
-                const words = @min(self.blockWords(ch, sync), avail);
-                var k: u32 = 0;
-                while (k < words) : (k += 1) {
-                    std.mem.writeInt(u32, self.ram[addr..][0..4], self.mdec.readData(), .little);
-                    addr = (addr +% step) & 0x1FFFFC;
+            1 => { // MDEC -> RAM: anda conforme o MDEC produz (DREQ); senão fica pendente
+                if (!self.mdec1_active) {
+                    self.mdec1_active = true;
+                    self.mdec1_left = self.blockWords(ch, sync);
+                    self.mdec1_addr = addr;
                 }
+                self.mdecOutPump();
+                return;
             },
             else => {}, // SPU/PIO: só completa
         }
         if (self.watch_armed and self.watch_dma < 0 and std.mem.readInt(u32, self.ram[0x80..0x84], .little) == 0) self.watch_dma = @intCast(ch);
         self.dmaDone(ch);
+    }
+
+    /// Continua o DMA1 pendente com os dados que o MDEC já tem.
+    pub fn mdecOutPump(self: *Psx) void {
+        if (!self.mdec1_active) return;
+        const step: u32 = if (self.dma_chcr[1] & 2 != 0) @bitCast(@as(i32, -4)) else 4;
+        while (self.mdec1_left > 0 and self.mdec.out_pos < self.mdec.out_len) : (self.mdec1_left -= 1) {
+            std.mem.writeInt(u32, self.ram[self.mdec1_addr..][0..4], self.mdec.readData(), .little);
+            self.mdec1_addr = (self.mdec1_addr +% step) & 0x1FFFFC;
+        }
+        self.dma_madr[1] = self.mdec1_addr;
+        if (self.mdec1_left == 0) {
+            self.mdec1_active = false;
+            self.dmaDone(1);
+        }
     }
 
     fn blockWords(self: *Psx, ch: u32, sync: u32) u32 {
@@ -485,6 +547,15 @@ pub fn interpRun(psx: *Psx, until: u64) void {
             psx.jump_i +%= 1;
         }
         psx.last_pc = pc;
+        if (pc == 0x8009f4e4) {
+            psx.dbg_bs_hits += 1;
+            if (psx.dbg_bs_hits == 3) {
+                const a = psx.cpu.r[4] & 0x1FFFFF;
+                psx.dbg_bs_addr = a;
+                @memcpy(&psx.dbg_bs, psx.ram[a .. a + 16384]);
+                psx.dbg_ramsnap = psx.ram;
+            }
+        }
         psx.trace_i +%= 1;
         const seg = pc & 0x1FFFFFFF;
         if (!psx.halted and !(seg < 0x200000 or (seg >= 0x1FC00000 and seg < 0x1FC80000))) {

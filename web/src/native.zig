@@ -81,6 +81,11 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("dma kicks={any} chcrw={any} w0={d} first0={x} chcr0={x} chcr1={x}\n", .{ psx.dbg_dma, psx.dbg_chcr_writes, psx.dbg_dma_words0, psx.dbg_dma_first0, psx.dma_chcr[0], psx.dma_chcr[1] });
     for (psx.dbg_log[0..psx.dbg_log_len]) |e| std.debug.print("dma0 madr={x} bcr={x} chcr={x} | mdec cmd={x} need={d} len={d}\n", .{ e[0], e[1], e[2], e[3], e[4], e[5] });
     for (psx.cdrom.dbg[0..psx.cdrom.dbg_n]) |e| std.debug.print("cd cmd={x} p0={x} loc={d} mode={x}\n", .{ e[0], e[1], e[2], e[3] });
+    for (psx.dbg_mw[0..psx.dbg_mw_n]) |e| std.debug.print("mdec write pc={x} v={x} ra={x}\n", .{ e[0], e[1], e[2] });
+    for (psx.dbg_hw[0..psx.dbg_hw_n]) |e| std.debug.print("w1a pc={x} a={x} v={x}\n", .{ e[0], e[1], e[2] });
+    std.debug.print("ram 1a0000: ", .{});
+    for (0..8) |k| std.debug.print("{x:0>8} ", .{std.mem.readInt(u32, psx.ram[0x1a0000 + k * 4 ..][0..4], .little)});
+    std.debug.print("\n", .{});
     std.debug.print("TTY:\n{s}\n", .{psx.tty[0..psx.tty_len]});
 
     // grava a VRAM inteira (1024x512) como PPM
@@ -95,6 +100,39 @@ pub fn main(init: std.process.Init) !void {
         rgb[i * 3 + 2] = @intCast(((px >> 10) & 0x1F) << 3);
     }
     try out.writeStreamingAll(io, rgb);
+    {
+        const scr = try arena.alloc(u8, 640 * 480 * 4);
+        const d = psx.gpu.renderDisplay(scr);
+        const name = try std.fmt.allocPrint(arena, "{s}.screen.ppm", .{args[5]});
+        const so = try Io.Dir.cwd().createFile(io, name, .{});
+        defer so.close(io);
+        var hb: [32]u8 = undefined;
+        try so.writeStreamingAll(io, try std.fmt.bufPrint(&hb, "P6\n{d} {d}\n255\n", .{ d.w, d.h }));
+        const px = try arena.alloc(u8, d.w * d.h * 3);
+        for (0..d.w * d.h) |i| {
+            px[i * 3] = scr[i * 4];
+            px[i * 3 + 1] = scr[i * 4 + 1];
+            px[i * 3 + 2] = scr[i * 4 + 2];
+        }
+        try so.writeStreamingAll(io, px);
+    }
+    {
+        const mf = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/mdec3.bin", .{});
+        defer mf.close(io);
+        try mf.writeStreamingAll(io, std.mem.sliceAsBytes(psx.mdec.dbg_frame[0..psx.mdec.dbg_frame_len]));
+    }
+    {
+        std.debug.print("bitstream addr={x}\n", .{psx.dbg_bs_addr});
+        const bf = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/bs1.bin", .{});
+        defer bf.close(io);
+        try bf.writeStreamingAll(io, &psx.dbg_bs);
+        const rf = try Io.Dir.cwd().createFile(io, "/private/tmp/claude-501/-Volumes-life-code-fun-Trap-Gunner/4c9538ba-fb9f-4c7d-8f03-894944cde628/scratchpad/ramsnap.bin", .{});
+        defer rf.close(io);
+        try rf.writeStreamingAll(io, &psx.dbg_ramsnap);
+    }
+    for (psx.cdrom.dlog[0..psx.cdrom.dlog_n]) |e| std.debug.print("load lba={d} prevpos={d}/{d} mode={x}\n", .{ e[0], e[1], e[2], e[3] });
+    for (psx.dbg_d3[0..psx.dbg_d3_n]) |e| std.debug.print("dma3 lba={d} addr={x} words={d} fifo_pos={d}\n", .{ e[0], e[1], e[2], e[3] });
+    std.debug.print("mdec1 active={} left={d} out={d}/{d} in={d}/{d} cmd={x} kicks={any}\n", .{ psx.mdec1_active, psx.mdec1_left, psx.mdec.out_pos, psx.mdec.out_len, psx.mdec.in_len, psx.mdec.in_need, psx.mdec.cmd, psx.dbg_dma });
     std.debug.print("display x={d} y={d} {d}x{d}\n", .{ psx.gpu.disp_x, psx.gpu.disp_y, psx.gpu.displaySize().w, psx.gpu.displaySize().h });
 }
 

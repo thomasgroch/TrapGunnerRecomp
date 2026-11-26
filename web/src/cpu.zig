@@ -108,7 +108,7 @@ pub const Cpu = struct {
         out[0] = 0;
         self.r = out;
         self.branch_taken_prev = self.branch_taken;
-        psx.cycles += 2;
+        psx.cycles += 1;
     }
 
 

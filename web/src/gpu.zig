@@ -154,6 +154,49 @@ pub const Gpu = struct {
         return .{ .w = w, .h = h };
     }
 
+    /// Converte a área visível para RGBA8888 (15 ou 24 bits). Retorna w,h.
+    pub fn renderDisplay(self: *Gpu, out: []u8) struct { w: u32, h: u32 } {
+        const sz = self.displaySize();
+        const w = sz.w;
+        const h = @min(sz.h, 480);
+        const bpp24 = self.disp_mode & 0x10 != 0;
+        var y: u32 = 0;
+        while (y < h) : (y += 1) {
+            const vy = (self.disp_y + y) & 511;
+            var x: u32 = 0;
+            while (x < w) : (x += 1) {
+                const o = (y * w + x) * 4;
+                if (o + 4 > out.len) return .{ .w = w, .h = h };
+                var r: u8 = 0;
+                var g: u8 = 0;
+                var b: u8 = 0;
+                if (bpp24) {
+                    const byte_x = self.disp_x * 2 + x * 3;
+                    const row = vy * W;
+                    const B = struct {
+                        fn at(v: []const u16, rw: u32, bx: u32) u8 {
+                            const px = v[rw + ((bx / 2) & 1023)];
+                            return @truncate(if (bx & 1 == 0) px else px >> 8);
+                        }
+                    };
+                    r = B.at(&self.vram, row, byte_x);
+                    g = B.at(&self.vram, row, byte_x + 1);
+                    b = B.at(&self.vram, row, byte_x + 2);
+                } else {
+                    const px = self.vram[vy * W + ((self.disp_x + x) & 1023)];
+                    r = @intCast((px & 0x1F) << 3);
+                    g = @intCast(((px >> 5) & 0x1F) << 3);
+                    b = @intCast(((px >> 10) & 0x1F) << 3);
+                }
+                out[o] = r;
+                out[o + 1] = g;
+                out[o + 2] = b;
+                out[o + 3] = 255;
+            }
+        }
+        return .{ .w = w, .h = h };
+    }
+
     fn cmdLen(op: u8) u32 {
         return switch (op) {
             0x02 => 3,

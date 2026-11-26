@@ -37,6 +37,11 @@ pub const Cdrom = struct {
     ready_sector: bool = false,
     filter_file: u8 = 0,
     filter_chan: u8 = 0,
+    sector_seq: u32 = 0,
+    cur_lba: u32 = 0,
+    dlog: [32][4]u32 = undefined,
+    dlog_n: u32 = 0,
+    loaded_seq: u32 = 0,
     dbg: [48][4]u32 = undefined,
     dbg_n: u32 = 0,
 
@@ -66,7 +71,14 @@ pub const Cdrom = struct {
                 }
                 return 0;
             },
-            2 => return @truncate(self.dataWord()),
+            2 => {
+                if (self.data_pos < self.data_len) {
+                    const b = self.data[self.data_pos];
+                    self.data_pos += 1;
+                    return b;
+                }
+                return 0;
+            },
             3 => return if (self.index & 1 == 0) self.ie | 0xE0 else self.iflag | 0xE0,
         }
     }
@@ -103,7 +115,7 @@ pub const Cdrom = struct {
                 0 => {
                     // BFRD: liberar setor para leitura
                     if (v & 0x80 != 0) {
-                        if (self.data_pos >= self.data_len) self.loadData();
+                        if (self.data_pos >= self.data_len or self.sector_seq != self.loaded_seq) self.loadData();
                         self.want_data = true;
                     } else {
                         self.want_data = false;
@@ -122,6 +134,11 @@ pub const Cdrom = struct {
 
     fn loadData(self: *Cdrom) void {
         if (!self.ready_sector) return;
+        if (self.cur_lba >= 10497 and self.cur_lba < 10520 and self.dlog_n < 32) {
+            self.dlog[self.dlog_n] = .{ self.cur_lba, self.data_pos, self.data_len, self.mode };
+            self.dlog_n += 1;
+        }
+        self.loaded_seq = self.sector_seq;
         if (self.mode & 0x20 != 0) {
             @memcpy(self.data[0..2340], self.sector[12..2352]);
             self.data_len = 2340;
@@ -257,12 +274,16 @@ pub const Cdrom = struct {
         }
         if (self.reading and psx.cycles >= self.next_read_at and self.iflag & 7 == 0) {
             self.next_read_at = psx.cycles + self.readDelay();
-            if (self.reader) |r| {
-                self.ready_sector = r(self.loc, &self.sector);
-            }
+            var tmp: [2352]u8 = undefined;
+            const ok = if (self.reader) |r| r(self.loc, &tmp) else false;
             self.loc += 1;
-            // setores de áudio XA (submodo bit 2) são filtrados/descartados aqui
-            if (self.mode & 0x40 != 0 and self.sector[18] & 0x04 != 0) return;
+            // setores de áudio XA (submodo bit 2) vão para a SPU, não para a CPU:
+            // descarta sem tocar no buffer do setor de dados anterior
+            if (ok and self.mode & 0x40 != 0 and tmp[18] & 0x04 != 0) return;
+            self.sector = tmp;
+            self.cur_lba = self.loc - 1;
+            self.ready_sector = ok;
+            self.sector_seq +%= 1;
             self.ack(1, &.{self.stat});
             psx.raise(.cdrom);
         }
