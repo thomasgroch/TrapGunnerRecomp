@@ -26,6 +26,6 @@ zig build -Doptimize=ReleaseFast   # native harness (tests without a browser)
 ```
 
 Serve `www/` over HTTP and open it in the browser. Cloudflare Pages publishes it automatically
-(`.github/workflows/cloudflare.yml`, project `trapgunner`, https://trapgunner.thomasdev.xyz).
+(`.github/workflows/cloudflare.yml`, Pages project `trapgunner` on account `tdev`: https://trapgunner.pages.dev).
 
 `www/openbios.bin` is OpenBIOS (PCSX-Redux project, MIT; see `OpenBIOS.LICENSE`).

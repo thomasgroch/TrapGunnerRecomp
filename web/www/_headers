@@ -1,0 +1,5 @@
+/psxcore.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=3600
+/*
+  X-Content-Type-Options: nosniff
