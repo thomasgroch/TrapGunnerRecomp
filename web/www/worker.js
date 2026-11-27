@@ -61,11 +61,11 @@ async function cacheToOpfs(file) {
 onmessage = async (e) => {
   const m = e.data;
   if (m.type === 'input') { pad1 = m.p1; pad2 = m.p2; pad2c = m.p2c; return; }
-  if (m.type === 'fps') { FRAME_MS = 1000 / m.fps; return; }
+  if (m.type === 'fps') { drawEvery = m.fps >= 60 ? 1 : 2; return; }
   if (m.type === 'remote') { remoteIn.set(m.f, m.p); return; }
   if (m.type === 'rhash') { checkHash(m.f, m.h); return; }
   if (m.type !== 'start') return;
-  if (m.fps) FRAME_MS = 1000 / m.fps;
+  if (m.fps) drawEvery = m.fps >= 60 ? 1 : 2;
   if (m.net) net = m.net;
   try {
     ctx = m.canvas.getContext('2d');
@@ -110,7 +110,9 @@ function checkHash(f, h) {
     myHash.delete(f); theirHash.delete(f);
   }
 }
-let FRAME_MS = 1000 / 60;
+// Velocidade fixa: NTSC = 59,94 quadros/s, independente da taxa da tela.
+const FRAME_MS = 1000 / 59.94;
+let drawEvery = 1;
 function loop(t = performance.now()) {
   acc += Math.min(100, t - (last || t));
   last = t;
@@ -141,7 +143,7 @@ function loop(t = performance.now()) {
     acc -= FRAME_MS;
     steps++;
     frames++;
-    if (steps === 1) draw(wh & 0xFFFF, wh >>> 16);
+    if (steps === 1 && frames % drawEvery === 0) draw(wh & 0xFFFF, wh >>> 16);
   }
   if (t - fpsT > 2000) {
     const fps = Math.round((frames * 1000) / (t - fpsT));

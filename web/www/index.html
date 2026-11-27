@@ -37,12 +37,10 @@
       <button class="secondary" id="cached" hidden>Usar disco salvo no navegador</button>
       <label class="row" style="gap:6px"><input type="checkbox" id="skipfmv" checked> Pular vídeos</label>
       <button class="secondary" id="mute">🔊 Som</button>
-      <label class="row" style="gap:6px">FPS
+      <label class="row" style="gap:6px" title="O jogo sempre roda a 60 quadros/s; isto só limita quantos são desenhados">Desenhar
         <select id="fps">
-          <option value="30">30 (metade da velocidade)</option>
-          <option value="60" selected>60 (normal)</option>
-          <option value="90">90 (1,5×)</option>
-          <option value="120">120 (2×)</option>
+          <option value="60" selected>60 fps</option>
+          <option value="30">30 fps (economiza bateria)</option>
         </select>
       </label>
     </div>
@@ -51,6 +49,7 @@
       <button class="secondary" id="host">🌐 Criar sala online</button>
       <input id="code" maxlength="6" placeholder="CÓDIGO" autocomplete="off" style="width:110px;text-transform:uppercase;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)">
       <button class="secondary" id="join">Entrar na sala</button>
+      <button class="secondary" id="copylink" hidden>🔗 Copiar link da sala</button>
     </div>
     <div id="status">Dump Redump de Trap Gunner (USA, SLUS-00679).</div>
   </div>

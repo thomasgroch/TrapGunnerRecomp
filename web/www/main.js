@@ -39,16 +39,21 @@ async function opfsDisc() {
 }
 
 // ---- audio: AudioWorklet with a ring buffer, 44.1 kHz stereo ----
-let audioNode = null;
+let audioNode = null, ac = null, muted = false;
+// Browsers only allow audio after a user gesture: create/resume the context on every click or key.
+const unlock = () => { if (!ac) ac = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' }); if (!muted && ac.state !== 'running') ac.resume(); };
+addEventListener('pointerdown', unlock, true);
+addEventListener('keydown', unlock, true);
 async function initAudio() {
   try {
-    const ac = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+    unlock();
     await ac.audioWorklet.addModule('audio-worklet.js');
     audioNode = new AudioWorkletNode(ac, 'psx-audio', { outputChannelCount: [2] });
     audioNode.connect(ac.destination);
     await ac.resume();
     $('mute').onclick = () => {
-      if (ac.state === 'running') { ac.suspend(); $('mute').textContent = '🔇 Som'; }
+      muted = !muted;
+      if (muted) { ac.suspend(); $('mute').textContent = '🔇 Som'; }
       else { ac.resume(); $('mute').textContent = '🔊 Som'; }
     };
   } catch (e) { console.warn('audio indisponível', e); }
@@ -56,7 +61,7 @@ async function initAudio() {
 
 function start(source, net = null) {
   initAudio();
-  $('setup').querySelectorAll('button,label.btn,input,select').forEach((b) => { if (b.id !== 'mute' && b.id !== 'fps') b.setAttribute('disabled', ''); });
+  $('setup').querySelectorAll('button,label.btn,input,select').forEach((b) => { if (!['mute', 'fps', 'copylink'].includes(b.id)) b.setAttribute('disabled', ''); });
   const canvas = $('screen').transferControlToOffscreen();
   worker = new Worker('worker.js');
   worker.onmessage = (e) => {
@@ -75,11 +80,25 @@ function start(source, net = null) {
 
 // ---- disc chosen: show the modes ----
 let source = null;
+const roomFromUrl = () => (location.hash.match(/^#\/sala\/([A-Z0-9]{6})$/i) || [])[1]?.toUpperCase();
+const roomLink = (code) => `${location.origin}${location.pathname}#/sala/${code}`;
 function discReady(s) {
   source = s;
   $('modes').hidden = false;
-  status('Disco pronto. Jogue sozinho ou online.');
+  const code = roomFromUrl();
+  if (code) { $('code').value = code; status(`Disco pronto. Clique em "Entrar na sala" para entrar em ${code}.`); $('join').focus(); }
+  else status('Disco pronto. Jogue sozinho ou online.');
 }
+function showRoom() {
+  const code = roomFromUrl();
+  if (code) { $('code').value = code; if (!source) status(`Convite para a sala ${code}: escolha seu disco para entrar.`); }
+}
+addEventListener('hashchange', showRoom);
+showRoom();
+$('copylink').onclick = async () => {
+  const link = roomLink($('code').value);
+  try { await navigator.clipboard.writeText(link); status('Link copiado: ' + link); } catch { prompt('Copie o link:', link); }
+};
 $('solo').onclick = () => start(source);
 
 // ---- online play: WebRTC + signaling at /api/room/CODE ----
@@ -123,14 +142,17 @@ $('host').onclick = async () => {
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc);
     if (!(await api(code, 'POST', { kind: 'offer', sdp: pc.localDescription }))) throw new Error('não foi possível criar a sala');
-    status(`Sala criada: ${code} — passe este código para o outro jogador. Aguardando…`);
     $('code').value = code;
+    history.replaceState(null, '', '#/sala/' + code);
+    $('copylink').hidden = false;
+    status(`Sala criada: mande o link ${roomLink(code)} para o outro jogador. Aguardando…`);
     await pc.setRemoteDescription(await poll(code, 'answer'));
   } catch (e) { status('Online: ' + e.message); }
 };
 $('join').onclick = async () => {
   try {
     const code = $('code').value.trim().toUpperCase();
+    if (/^[A-Z0-9]{6}$/.test(code)) history.replaceState(null, '', '#/sala/' + code);
     if (!/^[A-Z0-9]{6}$/.test(code)) return status('Digite o código de 6 caracteres.');
     status('Procurando a sala…');
     pc = new RTCPeerConnection({ iceServers: ICE });
@@ -146,15 +168,15 @@ $('join').onclick = async () => {
 $('disc').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  start({ kind: 'file', file });
+  discReady({ kind: 'file', file });
 });
-// FPS alvo (ajusta a velocidade do jogo); lembrado entre visitas.
-try { const f = localStorage.getItem('tg.fps'); if (f) $('fps').value = f; } catch {}
+// Quadros desenhados por segundo (a velocidade do jogo não muda); lembrado entre visitas.
+try { const f = localStorage.getItem('tg.fps'); if (f === '30' || f === '60') $('fps').value = f; } catch {}
 $('fps').addEventListener('change', () => {
   try { localStorage.setItem('tg.fps', $('fps').value); } catch {}
   worker?.postMessage({ type: 'fps', fps: +$('fps').value });
 });
-$('cached').addEventListener('click', () => start({ kind: 'opfs' }));
+$('cached').addEventListener('click', () => discReady({ kind: 'opfs' }));
 (async () => { if (await opfsDisc()) $('cached').hidden = false; })();
 
 // Teste local: ?disc=URL lê o disco por HTTP Range (servidor local).
