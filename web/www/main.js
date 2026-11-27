@@ -47,7 +47,7 @@ function start(source) {
     if (m.type === 'status') status(m.text);
     if (m.type === 'error') status('Erro: ' + m.text);
   };
-  worker.postMessage({ type: 'start', canvas, source, skipFmv: $('skipfmv').checked }, [canvas]);
+  worker.postMessage({ type: 'start', canvas, source, skipFmv: $('skipfmv').checked, fps: +$('fps').value }, [canvas]);
   requestAnimationFrame(inputLoop);
 }
 
@@ -55,6 +55,12 @@ $('disc').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   start({ kind: 'file', file });
+});
+// FPS alvo (ajusta a velocidade do jogo); lembrado entre visitas.
+try { const f = localStorage.getItem('tg.fps'); if (f) $('fps').value = f; } catch {}
+$('fps').addEventListener('change', () => {
+  try { localStorage.setItem('tg.fps', $('fps').value); } catch {}
+  worker?.postMessage({ type: 'fps', fps: +$('fps').value });
 });
 $('cached').addEventListener('click', () => start({ kind: 'opfs' }));
 (async () => { if (await opfsDisc()) $('cached').hidden = false; })();

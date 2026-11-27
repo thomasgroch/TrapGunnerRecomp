@@ -25,7 +25,7 @@ zig build -Doptimize=ReleaseFast   # native harness (tests without a browser)
 ./zig-out/bin/psxweb-native www/openbios.bin "Trap Gunner.bin" SLUS_006.79 900 out.ppm
 ```
 
-Serve `www/` over HTTP and open it in the browser. GitHub Pages publishes it automatically
-(`.github/workflows/pages.yml`).
+Serve `www/` over HTTP and open it in the browser. Cloudflare Pages publishes it automatically
+(`.github/workflows/cloudflare.yml`, project `trapgunner`, https://trapgunner.thomasdev.xyz).
 
 `www/openbios.bin` is OpenBIOS (PCSX-Redux project, MIT; see `OpenBIOS.LICENSE`).

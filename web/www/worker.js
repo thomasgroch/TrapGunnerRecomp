@@ -58,7 +58,9 @@ async function cacheToOpfs(file) {
 onmessage = async (e) => {
   const m = e.data;
   if (m.type === 'input') { pad1 = m.p1; pad2 = m.p2; pad2c = m.p2c; return; }
+  if (m.type === 'fps') { FRAME_MS = 1000 / m.fps; return; }
   if (m.type !== 'start') return;
+  if (m.fps) FRAME_MS = 1000 / m.fps;
   try {
     ctx = m.canvas.getContext('2d');
     const src = m.source;
@@ -94,12 +96,12 @@ onmessage = async (e) => {
 };
 
 let last = 0, acc = 0, frames = 0, fpsT = performance.now();
-const FRAME_MS = 1000 / 60;
+let FRAME_MS = 1000 / 60;
 function loop(t = performance.now()) {
   acc += Math.min(100, t - (last || t));
   last = t;
   let steps = 0;
-  while (acc >= FRAME_MS && steps < 3) {
+  while (acc >= FRAME_MS && steps < 4) {
     const wh = core.tg_frame(pad1, pad2, pad2c ? 1 : 0);
     acc -= FRAME_MS;
     steps++;

@@ -19,6 +19,7 @@
   button, label.btn { display:inline-block; background:var(--accent); color:#04130a; border:0; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer; }
   button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
   input[type=file] { display:none; }
+  select { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px; }
   #status { color:var(--muted); margin-top:8px; min-height:1.5em; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   kbd { border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:13px; }
@@ -35,6 +36,14 @@
       <label class="btn">Escolher disco (.bin)<input id="disc" type="file" accept=".bin,.img,.iso"></label>
       <button class="secondary" id="cached" hidden>Usar disco salvo no navegador</button>
       <label class="row" style="gap:6px"><input type="checkbox" id="skipfmv" checked> Pular vídeos</label>
+      <label class="row" style="gap:6px">FPS
+        <select id="fps">
+          <option value="30">30 (metade da velocidade)</option>
+          <option value="60" selected>60 (normal)</option>
+          <option value="90">90 (1,5×)</option>
+          <option value="120">120 (2×)</option>
+        </select>
+      </label>
     </div>
     <div id="status">Dump Redump de Trap Gunner (USA, SLUS-00679).</div>
   </div>

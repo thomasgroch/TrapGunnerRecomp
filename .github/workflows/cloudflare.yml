@@ -1,0 +1,22 @@
+name: Web (Cloudflare Pages)
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/cloudflare.yml']
+  workflow_dispatch:
+concurrency: { group: cloudflare-pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with: { version: 0.17.1 }
+      - run: zig build test && zig build wasm
+        working-directory: web
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/www --project-name trapgunner --branch main
