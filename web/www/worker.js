@@ -1,6 +1,9 @@
 // Worker: carrega o núcleo wasm, lê o disco do jogador de forma síncrona e desenha.
 let mem, core, readSector, ctx, img;
 let pad1 = 0xFFFF, pad2 = 0xFFFF, pad2c = false;
+// Online play (lockstep): `net` = { slot: 0|1, delay } ; inputs per frame.
+let net = null, frameNo = 0;
+const localIn = new Map(), remoteIn = new Map();
 const post = (type, text) => postMessage({ type, text });
 
 // --- fontes de disco (todas síncronas, só possíveis dentro de um worker) ---
@@ -59,8 +62,11 @@ onmessage = async (e) => {
   const m = e.data;
   if (m.type === 'input') { pad1 = m.p1; pad2 = m.p2; pad2c = m.p2c; return; }
   if (m.type === 'fps') { FRAME_MS = 1000 / m.fps; return; }
+  if (m.type === 'remote') { remoteIn.set(m.f, m.p); return; }
+  if (m.type === 'rhash') { checkHash(m.f, m.h); return; }
   if (m.type !== 'start') return;
   if (m.fps) FRAME_MS = 1000 / m.fps;
+  if (m.net) net = m.net;
   try {
     ctx = m.canvas.getContext('2d');
     const src = m.source;
@@ -95,14 +101,38 @@ onmessage = async (e) => {
   }
 };
 
-let last = 0, acc = 0, frames = 0, fpsT = performance.now();
+let last = 0, acc = 0, frames = 0, fpsT = performance.now(), stalled = 0;
+const myHash = new Map(), theirHash = new Map();
+function checkHash(f, h) {
+  if (h !== null) theirHash.set(f, h);
+  if (myHash.has(f) && theirHash.has(f)) {
+    if (myHash.get(f) !== theirHash.get(f)) post('status', `⚠️ Dessincronizado no quadro ${f}: os jogos divergiram.`);
+    myHash.delete(f); theirHash.delete(f);
+  }
+}
 let FRAME_MS = 1000 / 60;
 function loop(t = performance.now()) {
   acc += Math.min(100, t - (last || t));
   last = t;
   let steps = 0;
   while (acc >= FRAME_MS && steps < 4) {
-    const wh = core.tg_frame(pad1, pad2, pad2c ? 1 : 0);
+    let wh;
+    if (net) {
+      // send my input for frame (frameNo + delay); run frameNo when both are in
+      const ahead = frameNo + net.delay;
+      if (!localIn.has(ahead)) { localIn.set(ahead, pad1); postMessage({ type: 'local', f: ahead, p: pad1 }); }
+      const mine = frameNo < net.delay ? 0xFFFF : localIn.get(frameNo);
+      const theirs = frameNo < net.delay ? 0xFFFF : remoteIn.get(frameNo);
+      if (theirs === undefined) { stalled++; break; } // waiting for the other player
+      stalled = 0;
+      const p1 = net.slot === 0 ? mine : theirs, p2 = net.slot === 0 ? theirs : mine;
+      wh = core.tg_frame(p1, p2, 1);
+      localIn.delete(frameNo); remoteIn.delete(frameNo);
+      if (frameNo % 300 === 0) { const h = core.tg_hash() >>> 0; myHash.set(frameNo, h); postMessage({ type: 'hash', f: frameNo, h }); checkHash(frameNo, null); }
+      frameNo++;
+    } else {
+      wh = core.tg_frame(pad1, pad2, pad2c ? 1 : 0);
+    }
     const na = core.tg_audio();
     if (na) {
       const pcm = new Int16Array(mem.buffer, core.tg_audio_ptr(), na).slice();
@@ -113,7 +143,11 @@ function loop(t = performance.now()) {
     frames++;
     if (steps === 1) draw(wh & 0xFFFF, wh >>> 16);
   }
-  if (t - fpsT > 2000) { post('status', `Rodando · ${Math.round((frames * 1000) / (t - fpsT))} fps`); frames = 0; fpsT = t; }
+  if (t - fpsT > 2000) {
+    const fps = Math.round((frames * 1000) / (t - fpsT));
+    post('status', net ? `Online (P${net.slot + 1}) · ${fps} fps${stalled > 30 ? ' · aguardando o outro jogador…' : ''}` : `Rodando · ${fps} fps`);
+    frames = 0; fpsT = t;
+  }
   (self.requestAnimationFrame || ((f) => setTimeout(() => f(performance.now()), 4)))(loop);
 }
 function draw(w, h) {

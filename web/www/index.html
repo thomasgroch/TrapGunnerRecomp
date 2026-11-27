@@ -46,6 +46,12 @@
         </select>
       </label>
     </div>
+    <div class="row" id="modes" hidden style="margin-top:12px">
+      <button id="solo">▶ Jogar sozinho</button>
+      <button class="secondary" id="host">🌐 Criar sala online</button>
+      <input id="code" maxlength="6" placeholder="CÓDIGO" autocomplete="off" style="width:110px;text-transform:uppercase;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)">
+      <button class="secondary" id="join">Entrar na sala</button>
+    </div>
     <div id="status">Dump Redump de Trap Gunner (USA, SLUS-00679).</div>
   </div>
 
@@ -55,6 +61,8 @@
     <summary>Controles</summary>
     <p>Gamepad (Bluetooth/USB) é detectado sozinho. Teclado: setas = direcional, <kbd>X</kbd> = ✕, <kbd>Z</kbd> = ○,
       <kbd>S</kbd> = □, <kbd>A</kbd> = △, <kbd>Enter</kbd> = START, <kbd>Shift</kbd> = SELECT, <kbd>Q</kbd>/<kbd>W</kbd> = L1/R1.</p>
+    <p><b>Online:</b> os dois jogadores precisam do mesmo dump. Quem cria a sala é o jogador 1; passe o código para o amigo.
+      No menu do jogo escolha <b>VS MAN</b>. O FPS fica travado no valor de quem criou a sala.</p>
   </details>
 </main>
 <script src="main.js"></script>

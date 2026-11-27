@@ -1,0 +1,8 @@
+# Cloudflare Pages: static site (www/) + signaling for online play (functions/).
+name = "trapgunner"
+pages_build_output_dir = "www"
+compatibility_date = "2026-11-01"
+
+[[kv_namespaces]]
+binding = "TG_ROOMS"
+id = "15fe1172276e40aaac80ee9d3b9b0167"

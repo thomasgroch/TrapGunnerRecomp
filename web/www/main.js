@@ -54,9 +54,9 @@ async function initAudio() {
   } catch (e) { console.warn('audio indisponível', e); }
 }
 
-function start(source) {
+function start(source, net = null) {
   initAudio();
-  $('setup').querySelectorAll('button,label.btn').forEach((b) => b.setAttribute('disabled', ''));
+  $('setup').querySelectorAll('button,label.btn,input,select').forEach((b) => { if (b.id !== 'mute' && b.id !== 'fps') b.setAttribute('disabled', ''); });
   const canvas = $('screen').transferControlToOffscreen();
   worker = new Worker('worker.js');
   worker.onmessage = (e) => {
@@ -64,10 +64,84 @@ function start(source) {
     if (m.type === 'status') status(m.text);
     if (m.type === 'error') status('Erro: ' + m.text);
     if (m.type === 'audio' && audioNode) audioNode.port.postMessage(m.pcm, [m.pcm.buffer]);
+    if (m.type === 'local' && chan?.readyState === 'open') chan.send(JSON.stringify({ t: 'in', f: m.f, p: m.p }));
+    if (m.type === 'hash' && chan?.readyState === 'open') chan.send(JSON.stringify({ t: 'hash', f: m.f, h: m.h }));
   };
-  worker.postMessage({ type: 'start', canvas, source, skipFmv: $('skipfmv').checked, fps: +$('fps').value }, [canvas]);
+  const fps = net?.fps ?? +$('fps').value;
+  worker.postMessage({ type: 'start', canvas, source, skipFmv: net ? net.skipFmv : $('skipfmv').checked, fps, net: net && { slot: net.slot, delay: 4 } }, [canvas]);
+  if (net) $('fps').setAttribute('disabled', '');
   requestAnimationFrame(inputLoop);
 }
+
+// ---- disc chosen: show the modes ----
+let source = null;
+function discReady(s) {
+  source = s;
+  $('modes').hidden = false;
+  status('Disco pronto. Jogue sozinho ou online.');
+}
+$('solo').onclick = () => start(source);
+
+// ---- online play: WebRTC + signaling at /api/room/CODE ----
+let pc = null, chan = null;
+const ICE = [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+async function gathered(pc) {
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise((r) => { pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r()); setTimeout(r, 4000); });
+}
+async function api(code, method, body) {
+  const r = await fetch(`/api/room/${code}` + (method === 'GET' ? `?want=${body}` : ''), method === 'GET' ? {} : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return r.ok ? r.json() : null;
+}
+async function poll(code, want) {
+  for (let i = 0; i < 300; i++) { const r = await api(code, 'GET', want); if (r?.sdp) return r.sdp; await sleep(1000); }
+  throw new Error('tempo esgotado esperando o outro jogador');
+}
+function wire(slot, onOpen) {
+  chan.onopen = onOpen;
+  chan.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.t === 'start') start(source, { slot, fps: m.fps, skipFmv: m.skipFmv });
+    if (m.t === 'in') worker?.postMessage({ type: 'remote', f: m.f, p: m.p });
+    if (m.t === 'hash') worker?.postMessage({ type: 'rhash', f: m.f, h: m.h });
+  };
+  chan.onclose = () => status('Conexão com o outro jogador encerrada.');
+}
+$('host').onclick = async () => {
+  try {
+    const code = newCode();
+    pc = new RTCPeerConnection({ iceServers: ICE });
+    chan = pc.createDataChannel('inputs', { ordered: true });
+    wire(0, () => {
+      status('Conectado! Iniciando…');
+      const cfg = { t: 'start', fps: +$('fps').value, skipFmv: $('skipfmv').checked };
+      chan.send(JSON.stringify(cfg));
+      start(source, { slot: 0, fps: cfg.fps, skipFmv: cfg.skipFmv });
+    });
+    await pc.setLocalDescription(await pc.createOffer());
+    await gathered(pc);
+    if (!(await api(code, 'POST', { kind: 'offer', sdp: pc.localDescription }))) throw new Error('não foi possível criar a sala');
+    status(`Sala criada: ${code} — passe este código para o outro jogador. Aguardando…`);
+    $('code').value = code;
+    await pc.setRemoteDescription(await poll(code, 'answer'));
+  } catch (e) { status('Online: ' + e.message); }
+};
+$('join').onclick = async () => {
+  try {
+    const code = $('code').value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) return status('Digite o código de 6 caracteres.');
+    status('Procurando a sala…');
+    pc = new RTCPeerConnection({ iceServers: ICE });
+    pc.ondatachannel = (e) => { chan = e.channel; wire(1, () => status('Conectado! Aguardando o jogador 1 iniciar…')); };
+    await pc.setRemoteDescription(await poll(code, 'offer'));
+    await pc.setLocalDescription(await pc.createAnswer());
+    await gathered(pc);
+    await api(code, 'POST', { kind: 'answer', sdp: pc.localDescription });
+    status('Conectando ao jogador 1…');
+  } catch (e) { status('Online: ' + e.message); }
+};
 
 $('disc').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -85,6 +159,7 @@ $('cached').addEventListener('click', () => start({ kind: 'opfs' }));
 
 // Teste local: ?disc=URL lê o disco por HTTP Range (servidor local).
 const qs = new URLSearchParams(location.search);
-if (qs.get('disc')) start({ kind: 'url', url: qs.get('disc') });
+if (qs.get('disc')) discReady({ kind: 'url', url: qs.get('disc') });
+if (qs.get('autostart')) start(source);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');

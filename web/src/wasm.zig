@@ -68,3 +68,14 @@ export fn tg_audio() u32 {
     }
     return n;
 }
+
+/// FNV-1a over main RAM: lets two peers in online play detect a desync.
+export fn tg_hash() u32 {
+    var h: u32 = 0x811C9DC5;
+    var i: usize = 0;
+    while (i < g_psx.ram.len) : (i += 64) {
+        h ^= std.mem.readInt(u32, g_psx.ram[i..][0..4], .little);
+        h *%= 0x01000193;
+    }
+    return h;
+}
