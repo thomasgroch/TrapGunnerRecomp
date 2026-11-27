@@ -15,47 +15,6 @@ fn readSector(lba: u32, out: *[2352]u8) bool {
 }
 
 var g_psx: Psx = undefined;
-var g_clone: Psx = undefined;
-var g_clone_done = false;
-
-fn countBlocks(ram: []const u8, addr: u32, words: u32) u32 {
-    var pos: u32 = 0;
-    var blocks: u32 = 0;
-    const n = words * 2;
-    const H = struct {
-        fn at(r: []const u8, a: u32, i: u32) u16 {
-            return std.mem.readInt(u16, r[(a + i * 2) & 0x1FFFFF ..][0..2], .little);
-        }
-    };
-    while (pos < n) {
-        while (pos < n and H.at(ram, addr, pos) == 0xFE00) pos += 1;
-        if (pos >= n) break;
-        pos += 1;
-        var k: u32 = 0;
-        while (pos < n) {
-            const h = H.at(ram, addr, pos);
-            pos += 1;
-            k += (h >> 10) + 1;
-            if (k > 63) break;
-        }
-        blocks += 1;
-    }
-    return blocks;
-}
-
-/// Roda o decodificador VLC isolado (IRQs mascaradas) a partir do clone.
-fn vlcExperiment() void {
-    const c = &g_clone;
-    const out = c.cpu.r[5] & 0x1FFFFF; // a1 = buffer RLE
-    const ra = c.cpu.r[31];
-    c.imask = 0;
-    c.cpu.sr &= ~@as(u32, 1);
-    var n: u64 = 0;
-    while (c.cpu.pc != ra and n < 50_000_000) : (n += 1) c.cpu.step(c);
-    const hdr = std.mem.readInt(u32, c.ram[out..][0..4], .little);
-    const words = hdr & 0xFFFF;
-    std.debug.print("VLC isolado: {d} instr, header={x}, blocos={d} (macroblocos={d})\n", .{ n, hdr, countBlocks(&c.ram, out + 4, words), countBlocks(&c.ram, out + 4, words) / 6 });
-}
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -91,7 +50,6 @@ pub fn main(init: std.process.Init) !void {
     if (init.environ_map.get("FMV") == null) std.debug.print("skip FMV patch: {}\n", .{psx.trapGunnerSkipFmv()});
     psx.watch_armed = true;
     psx.dbg_bs_target = bs_target;
-    psx.dbg_clone = &g_clone;
 
     var wav: std.ArrayList(i16) = .empty;
     var f: u32 = 0;
@@ -107,11 +65,6 @@ pub fn main(init: std.process.Init) !void {
         if (f == 600) psx.sio.xlog_arm = true;
         psx.runFrame(psxmod.interpRun);
         while (psx.spu.out_r != psx.spu.out_w) : (psx.spu.out_r +%= 1) try wav.append(arena, psx.spu.out[psx.spu.out_r & 16383]);
-        if (!g_clone_done and psx.dbg_bs_hits >= 1 and psx.dbg_clone_ready) {
-            g_clone_done = true;
-            g_clone = psx.dbg_clone.*;
-            vlcExperiment();
-        }
         if (psx.halted) {
             std.debug.print("PC inválido no frame {d}; últimos PCs:\n", .{f});
             var k: u32 = 0;

@@ -74,8 +74,6 @@ pub const Psx = struct {
     dbg_hw_n: u32 = 0,
     dbg_bs_hits: u32 = 0,
     dbg_bs_target: u32 = 1,
-    dbg_clone: *Psx = undefined,
-    dbg_clone_ready: bool = false,
     dbg_bs_frame: u64 = 0,
     mdec1_active: bool = false,
     dbg_iop: [32][2]u32 = undefined,
@@ -244,7 +242,7 @@ pub const Psx = struct {
                 };
             },
             0x0F0 => return self.dpcr,
-            0x0F4 => return self.dicr,
+            0x0F4...0x0F7 => return self.dicr >> @intCast((off - 0xF4) * 8),
             0x100...0x12F => {
                 self.updateTimers();
                 const t = (off - 0x100) >> 4;
@@ -318,11 +316,20 @@ pub const Psx = struct {
                     else => {},
                 }
             },
-            0x0F0 => self.dpcr = v,
-            0x0F4 => {
-                // bits 24-30 escritos com 1 limpam os flags
-                const flags = (self.dicr & 0x7F000000) & ~(v & 0x7F000000);
-                self.dicr = (v & 0x00FF803F) | flags;
+            0x0F0...0x0F3 => {
+                const sh: u5 = @intCast((off - 0xF0) * 8);
+                const m = sizeMask(size) << sh;
+                self.dpcr = (self.dpcr & ~m) | ((v << sh) & m);
+            },
+            0x0F4...0x0F7 => {
+                // Writes of any size (libcd's stream code does `sb` to DICR+2 to
+                // enable/disable the DMA3 IRQ per sector). Only the written bytes
+                // change; flag bits 24-30 written as 1 are acknowledged.
+                const sh: u5 = @intCast((off - 0xF4) * 8);
+                const m = sizeMask(size) << sh;
+                const w = (v << sh) & m;
+                const flags = (self.dicr & 0x7F000000) & ~(w & 0x7F000000);
+                self.dicr = (self.dicr & ~m & 0x00FF803F) | (w & 0x00FF803F) | flags;
                 self.updateDicrMaster();
             },
             0x100...0x12F => {
@@ -651,19 +658,6 @@ pub fn interpRun(psx: *Psx, until: u64) void {
             psx.jump_i +%= 1;
         }
         psx.last_pc = pc;
-        if (pc == 0x8009f4e4) {
-            psx.dbg_bs_hits += 1;
-            if (psx.dbg_bs_hits == psx.dbg_bs_target) {
-                const a = psx.cpu.r[4] & 0x1FFFFF;
-                psx.dbg_bs_addr = a;
-                psx.dbg_bs_frame = psx.frame;
-                @memcpy(&psx.dbg_bs, psx.ram[a .. a + 16384]);
-                if (!psx.dbg_clone_ready and psx.dbg_bs_hits == 1) {
-                    psx.dbg_clone.* = psx.*;
-                    psx.dbg_clone_ready = true;
-                }
-            }
-        }
         psx.trace_i +%= 1;
         const seg = pc & 0x1FFFFFFF;
         if (!psx.halted and !(seg < 0x200000 or (seg >= 0x1FC00000 and seg < 0x1FC80000))) {
@@ -675,6 +669,14 @@ pub fn interpRun(psx: *Psx, until: u64) void {
 }
 
 /// Captura a saída de texto do kernel (A0:3C putchar, B0:3D putchar).
+fn sizeMask(size: u8) u32 {
+    return switch (size) {
+        1 => 0xFF,
+        2 => 0xFFFF,
+        else => 0xFFFFFFFF,
+    };
+}
+
 pub fn hleHooks(psx: *Psx) void {
     const pc = psx.cpu.pc & 0x1FFFFFFF;
     if (pc == 0xA0 and psx.cpu.r[9] == 0x3C) psx.putc(@truncate(psx.cpu.r[4]));
