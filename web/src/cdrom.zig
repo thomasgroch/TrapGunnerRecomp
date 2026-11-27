@@ -287,7 +287,12 @@ pub const Cdrom = struct {
             self.loc += 1;
             // setores de áudio XA (submodo bit 2) vão para a SPU, não para a CPU:
             // descarta sem tocar no buffer do setor de dados anterior
-            if (ok and self.mode & 0x40 != 0 and tmp[18] & 0x04 != 0) return;
+            if (ok and self.mode & 0x40 != 0 and tmp[18] & 0x04 != 0) {
+                // XA-ADPCM: goes to the SPU (respecting the file/channel filter)
+                const filter_ok = self.mode & 0x08 == 0 or (tmp[16] == self.filter_file and tmp[17] == self.filter_chan);
+                if (filter_ok) psx.spu.xaSector(&tmp);
+                return;
+            }
             if (ok and self.skip_fmv and tmp[24] == 0x60 and tmp[25] == 0x01 and tmp[26] == 0x01 and tmp[27] == 0x80) {
                 self.reading = false;
                 self.stat = 0x02;

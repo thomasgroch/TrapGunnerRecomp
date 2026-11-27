@@ -38,7 +38,24 @@ async function opfsDisc() {
   try { const root = await navigator.storage.getDirectory(); return await root.getFileHandle('disc.bin'); } catch { return null; }
 }
 
+// ---- audio: AudioWorklet with a ring buffer, 44.1 kHz stereo ----
+let audioNode = null;
+async function initAudio() {
+  try {
+    const ac = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+    await ac.audioWorklet.addModule('audio-worklet.js');
+    audioNode = new AudioWorkletNode(ac, 'psx-audio', { outputChannelCount: [2] });
+    audioNode.connect(ac.destination);
+    await ac.resume();
+    $('mute').onclick = () => {
+      if (ac.state === 'running') { ac.suspend(); $('mute').textContent = '🔇 Som'; }
+      else { ac.resume(); $('mute').textContent = '🔊 Som'; }
+    };
+  } catch (e) { console.warn('audio indisponível', e); }
+}
+
 function start(source) {
+  initAudio();
   $('setup').querySelectorAll('button,label.btn').forEach((b) => b.setAttribute('disabled', ''));
   const canvas = $('screen').transferControlToOffscreen();
   worker = new Worker('worker.js');
@@ -46,6 +63,7 @@ function start(source) {
     const m = e.data;
     if (m.type === 'status') status(m.text);
     if (m.type === 'error') status('Erro: ' + m.text);
+    if (m.type === 'audio' && audioNode) audioNode.port.postMessage(m.pcm, [m.pcm.buffer]);
   };
   worker.postMessage({ type: 'start', canvas, source, skipFmv: $('skipfmv').checked, fps: +$('fps').value }, [canvas]);
   requestAnimationFrame(inputLoop);

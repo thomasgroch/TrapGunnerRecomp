@@ -93,6 +93,7 @@ pub fn main(init: std.process.Init) !void {
     psx.dbg_bs_target = bs_target;
     psx.dbg_clone = &g_clone;
 
+    var wav: std.ArrayList(i16) = .empty;
     var f: u32 = 0;
     while (f < frames) : (f += 1) {
         for (args[6..]) |spec| {
@@ -105,6 +106,7 @@ pub fn main(init: std.process.Init) !void {
         }
         if (f == 600) psx.sio.xlog_arm = true;
         psx.runFrame(psxmod.interpRun);
+        while (psx.spu.out_r != psx.spu.out_w) : (psx.spu.out_r +%= 1) try wav.append(arena, psx.spu.out[psx.spu.out_r & 16383]);
         if (!g_clone_done and psx.dbg_bs_hits >= 1 and psx.dbg_clone_ready) {
             g_clone_done = true;
             g_clone = psx.dbg_clone.*;
@@ -153,6 +155,28 @@ pub fn main(init: std.process.Init) !void {
             const j = psx.jumps[(psx.jump_i +% k) & 31];
             std.debug.print("{x:0>8}->{x:0>8}\n", .{ j[0], j[1] });
         }
+    }
+    {
+        const name = try std.fmt.allocPrint(arena, "{s}.wav", .{args[5]});
+        const wf = try Io.Dir.cwd().createFile(io, name, .{});
+        defer wf.close(io);
+        var h: [44]u8 = undefined;
+        const data_len: u32 = @intCast(wav.items.len * 2);
+        @memcpy(h[0..4], "RIFF");
+        std.mem.writeInt(u32, h[4..8], 36 + data_len, .little);
+        @memcpy(h[8..16], "WAVEfmt ");
+        std.mem.writeInt(u32, h[16..20], 16, .little);
+        std.mem.writeInt(u16, h[20..22], 1, .little);
+        std.mem.writeInt(u16, h[22..24], 2, .little);
+        std.mem.writeInt(u32, h[24..28], 44100, .little);
+        std.mem.writeInt(u32, h[28..32], 44100 * 4, .little);
+        std.mem.writeInt(u16, h[32..34], 4, .little);
+        std.mem.writeInt(u16, h[34..36], 16, .little);
+        @memcpy(h[36..40], "data");
+        std.mem.writeInt(u32, h[40..44], data_len, .little);
+        try wf.writeStreamingAll(io, &h);
+        try wf.writeStreamingAll(io, std.mem.sliceAsBytes(wav.items));
+        std.debug.print("spu: voices kon, wav {d} samples\n", .{wav.items.len / 2});
     }
     std.debug.print("TTY:\n{s}\n", .{psx.tty[0..psx.tty_len]});
 

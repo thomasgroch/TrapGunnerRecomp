@@ -13,6 +13,7 @@ var g_psx: Psx = undefined;
 export var bios_buf: [512 * 1024]u8 = undefined;
 var exe_buf: [4 * 1024 * 1024]u8 = undefined;
 export var fb: [640 * 480 * 4]u8 = undefined;
+export var audio_buf: [8192]i16 = undefined;
 
 fn readSector(lba: u32, out: *[2352]u8) bool {
     return js_read_sector(lba, out);
@@ -51,4 +52,19 @@ export fn tg_frame(pad1: u32, pad2: u32, pad2_connected: bool) u32 {
     g_psx.runFrame(psxmod.interpRun);
     const d = g_psx.gpu.renderDisplay(&fb);
     return d.w | (d.h << 16);
+}
+
+export fn tg_audio_ptr() [*]i16 {
+    return &audio_buf;
+}
+/// Copies the samples generated since the last call (interleaved stereo)
+/// into `audio_buf`; returns how many i16 were copied.
+export fn tg_audio() u32 {
+    const s = &g_psx.spu;
+    var n: u32 = 0;
+    while (s.out_r != s.out_w and n < audio_buf.len) : (n += 1) {
+        audio_buf[n] = s.out[s.out_r & 16383];
+        s.out_r +%= 1;
+    }
+    return n;
 }

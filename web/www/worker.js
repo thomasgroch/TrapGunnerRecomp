@@ -103,6 +103,11 @@ function loop(t = performance.now()) {
   let steps = 0;
   while (acc >= FRAME_MS && steps < 4) {
     const wh = core.tg_frame(pad1, pad2, pad2c ? 1 : 0);
+    const na = core.tg_audio();
+    if (na) {
+      const pcm = new Int16Array(mem.buffer, core.tg_audio_ptr(), na).slice();
+      postMessage({ type: 'audio', pcm }, [pcm.buffer]);
+    }
     acc -= FRAME_MS;
     steps++;
     frames++;

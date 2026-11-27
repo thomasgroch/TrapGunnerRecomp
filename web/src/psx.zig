@@ -7,6 +7,7 @@ pub const Gte = @import("gte.zig").Gte;
 pub const Cdrom = @import("cdrom.zig").Cdrom;
 pub const Sio = @import("sio.zig").Sio;
 pub const Mdec = @import("mdec.zig").Mdec;
+pub const Spu = @import("spu.zig").Spu;
 
 pub const RAM_SIZE = 2 * 1024 * 1024;
 pub const BIOS_SIZE = 512 * 1024;
@@ -27,6 +28,7 @@ pub const Psx = struct {
     cdrom: Cdrom = .{},
     sio: Sio = .{},
     mdec: Mdec = .{},
+    spu: Spu = .{},
 
     cycles: u64 = 0,
     frame: u64 = 0,
@@ -47,7 +49,6 @@ pub const Psx = struct {
     tmr_target: [3]u32 = @splat(0),
     tmr_last: u64 = 0,
 
-    spu_regs: [512]u16 = @splat(0),
     tty: [4096]u8 = undefined,
     tty_len: usize = 0,
 
@@ -102,6 +103,7 @@ pub const Psx = struct {
         @memset(&self.scratch, 0);
         @memcpy(self.bios[0..@min(bios.len, BIOS_SIZE)], bios[0..@min(bios.len, BIOS_SIZE)]);
         self.cdrom.reader = reader;
+        self.spu.reset();
         self.gpu.reset();
         self.gte = .{};
     }
@@ -270,9 +272,9 @@ pub const Psx = struct {
             0x820 => return self.mdec.readData(),
             0x824 => return self.mdec.status(),
             0xC00...0xFFF => {
-                const idx = (off - 0xC00) >> 1;
-                if (off == 0xDAE) return self.spu_regs[(0xDAA - 0xC00) >> 1] & 0x3F; // SPUSTAT espelha SPUCNT
-                return self.spu_regs[idx];
+                const lo: u32 = self.spu.read(off - 0xC00);
+                if (size == 4) return lo | (@as(u32, self.spu.read(off - 0xC00 + 2)) << 16);
+                return lo;
             },
             else => return 0,
         }
@@ -353,9 +355,8 @@ pub const Psx = struct {
             },
             0x814 => self.gpu.gp1(v),
             0xC00...0xFFF => {
-                const idx = (off - 0xC00) >> 1;
-                self.spu_regs[idx] = @truncate(v);
-                if (size == 4 and idx + 1 < self.spu_regs.len) self.spu_regs[idx + 1] = @truncate(v >> 16);
+                self.spu.write(off - 0xC00, @truncate(v));
+                if (size == 4) self.spu.write(off - 0xC00 + 2, @truncate(v >> 16));
             },
             else => {},
         }
@@ -467,7 +468,19 @@ pub const Psx = struct {
                 self.mdecOutPump();
                 return;
             },
-            else => {}, // SPU/PIO: só completa
+            4 => { // RAM <-> SPU
+                const words = self.blockWords(ch, sync);
+                var k: u32 = 0;
+                while (k < words) : (k += 1) {
+                    if (to_ram) {
+                        std.mem.writeInt(u32, self.ram[addr..][0..4], self.spu.dmaRead(), .little);
+                    } else {
+                        self.spu.dmaWrite(std.mem.readInt(u32, self.ram[addr..][0..4], .little));
+                    }
+                    addr = (addr +% step) & 0x1FFFFC;
+                }
+            },
+            else => {}, // PIO: só completa
         }
         if (self.watch_armed and self.watch_dma < 0 and std.mem.readInt(u32, self.ram[0x80..0x84], .little) == 0) self.watch_dma = @intCast(ch);
         self.dmaDone(ch);
@@ -566,6 +579,7 @@ pub const Psx = struct {
         self.frame += 1;
         self.raise(.vblank);
         self.mdecWatchdog();
+        self.spu.generate(735); // 44100 / 60
         self.updateTimers();
     }
 
